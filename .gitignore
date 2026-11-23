@@ -1,0 +1,27 @@
+# Byte-compiled / Python packaging
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
+# Testing / Linters / Typecheckers
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Virtual environments & secrets
+.venv/
+venv/
+.env
+*.pem
+*.key
+
+# OS & IDE artifacts
+.DS_Store
+.idea/
+.vscode/

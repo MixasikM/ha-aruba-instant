@@ -1,0 +1,424 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Aruba-Topologie auswählen",
+        "description": "Wählen Sie aus, ob Sie einen Instant Virtual Controller / einzelnen Access Point verbinden oder mehrere eigenständige / AOS-10-Access-Points als gemeinsames WLAN abfragen möchten.",
+        "menu_options": {
+          "cluster": "Virtual-Controller-Cluster oder einzelner Access Point",
+          "multi_ap": "Mehrere eigenständige / AOS-10-APs (ohne Virtual Controller)"
+        }
+      },
+      "cluster": {
+        "title": "Virtual Controller / Einzelner Access Point",
+        "description": "Geben Sie die IP-Adresse des Virtual Controllers (empfohlen für Instant-Cluster) oder eines einzelnen Access Points ein.",
+        "data": {
+          "host": "Host oder IP-Adresse",
+          "username": "Benutzername",
+          "password": "Passwort",
+          "transport": "Übertragungsprotokoll"
+        },
+        "data_description": {
+          "host": "Virtual-Controller-VIP oder IP/Hostname eines einzelnen Access Points.",
+          "transport": "Auto bevorzugt die schnelle HTTPS-REST-API (:4343) und weicht bei Bedarf auf SSH (:22) aus."
+        },
+        "sections": {
+          "advanced": {
+            "name": "Erweiterte Netzwerkeinstellungen",
+            "description": "Benutzerdefinierte Ports, TLS-Zertifikatsprüfung und Legacy-SSH-Kompatibilität.",
+            "data": {
+              "rest_port": "HTTPS-REST-Port",
+              "ssh_port": "SSH-Port",
+              "verify_ssl": "SSL-Zertifikat überprüfen",
+              "legacy_ssh": "Legacy-SSH-Algorithmen erlauben"
+            },
+            "data_description": {
+              "rest_port": "Standardport der Aruba Instant REST API ist 4343.",
+              "ssh_port": "Standard-SSH-Port ist 22.",
+              "verify_ssl": "Für selbstsignierte Standard-Zertifikate von Aruba deaktiviert lassen.",
+              "legacy_ssh": "Aktivieren für ältere InstantOS-6.x-/-8.x-APs mit SHA-1-Schlüsselaustausch."
+            }
+          }
+        }
+      },
+      "multi_ap": {
+        "title": "Mehrere eigenständige / AOS-10-APs",
+        "description": "Fügen Sie IP-Adressen oder Hostnamen aller Access Points hinzu. Roaming-Clients werden in einer einzigen device_tracker-Entität zusammengeführt.",
+        "data": {
+          "network_name": "Netzwerk- / Standortname",
+          "hosts": "Access-Point-Hosts / IPs",
+          "separate_credentials_per_ap": "Access Points verwenden unterschiedliche Zugangsdaten",
+          "username": "Standard-Benutzername",
+          "password": "Standard-Passwort",
+          "transport": "Standard-Übertragungsprotokoll"
+        },
+        "data_description": {
+          "network_name": "Anzeigename für diesen gemeinsamen WLAN-Hub (für 'Aruba-Standort'-Entitäten).",
+          "hosts": "Eine oder mehrere IP-Adressen bzw. Hostnamen von Access Points eingeben.",
+          "separate_credentials_per_ap": "Aktivieren, wenn jeder AP eigene Zugangsdaten besitzt (z. B. werkseitige Seriennummer-Passwörter).",
+          "password": "Erforderlich, sofern oben keine AP-spezifischen Zugangsdaten aktiviert sind."
+        },
+        "sections": {
+          "advanced": {
+            "name": "Erweiterte Netzwerkeinstellungen",
+            "description": "Standardports, TLS-Prüfung und Legacy-SSH-Optionen für hinzugefügte APs.",
+            "data": {
+              "rest_port": "HTTPS-REST-Port",
+              "ssh_port": "SSH-Port",
+              "verify_ssl": "SSL-Zertifikat überprüfen",
+              "legacy_ssh": "Legacy-SSH-Algorithmen erlauben"
+            },
+            "data_description": {
+              "rest_port": "Standardport der Aruba Instant REST API ist 4343.",
+              "ssh_port": "Standard-SSH-Port ist 22.",
+              "verify_ssl": "Für selbstsignierte Standard-Zertifikate von Aruba deaktiviert lassen.",
+              "legacy_ssh": "Aktivieren für ältere InstantOS-6.x-/-8.x-APs mit SHA-1-Schlüsselaustausch."
+            }
+          }
+        }
+      },
+      "ap_credentials": {
+        "title": "Zugangsdaten für Access Point ({index}/{total})",
+        "description": "Geben Sie die Zugangsdaten für den Access Point **{host}** ein.",
+        "data": {
+          "username": "Benutzername",
+          "password": "Passwort",
+          "transport": "Übertragungsprotokoll"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Erweiterte Netzwerkeinstellungen",
+            "description": "Port-, TLS- und SSH-Optionen für {host}.",
+            "data": {
+              "rest_port": "HTTPS-REST-Port",
+              "ssh_port": "SSH-Port",
+              "verify_ssl": "SSL-Zertifikat überprüfen",
+              "legacy_ssh": "Legacy-SSH-Algorithmen erlauben"
+            },
+            "data_description": {
+              "rest_port": "Standardport der Aruba Instant REST API ist 4343.",
+              "ssh_port": "Standard-SSH-Port ist 22.",
+              "verify_ssl": "Für selbstsignierte Standard-Zertifikate von Aruba deaktiviert lassen.",
+              "legacy_ssh": "Aktivieren für ältere InstantOS-6.x-/-8.x-APs mit SHA-1-Schlüsselaustausch."
+            }
+          }
+        }
+      },
+      "confirm_enable_rest": {
+        "title": "REST-API auf {host} deaktiviert",
+        "description": "Die HTTPS-REST-API (:4343) auf **{host}** hat HTTP 503 zurückgegeben (`REST API Service is not enabled`).\n\nZum Aktivieren werden exakt folgende CLI-Befehle über SSH (`:22`) ausgeführt:\n`configure terminal` -> `allow-rest-api` -> `end` -> `commit apply` -> `write memory`\n\nWählen Sie, ob diese Konfigurationsänderung angewendet oder der AP unverändert rein lesend über SSH abgefragt werden soll.",
+        "data": {
+          "confirm_action": "Aktion"
+        }
+      },
+      "filters": {
+        "title": "SSID- & Client-Tracking-Filter",
+        "description": "Legen Sie fest, für welche SSIDs und WLAN-Clients Home-Assistant-Entitäten erstellt werden.",
+        "data": {
+          "tracked_ssids": "Überwachte SSIDs",
+          "unselected_ssid_mode": "Verhalten bei abgewählten SSIDs",
+          "track_new_clients": "Neu erkannte Clients automatisch verfolgen",
+          "track_unnamed_clients": "Clients ohne Hostnamen verfolgen",
+          "include_wired_clients": "Kabelgebundene AP-Downlink-Clients einbeziehen",
+          "require_ip": "Zugewiesene IPv4-Adresse voraussetzen",
+          "min_signal": "Minimaler SNR-Signalwert",
+          "exclude_macs": "Ausgeschlossene MAC-Adressen",
+          "enable_roaming_sensors": "Client-Roaming-Sensoren erstellen (AP & SSID)",
+          "scan_interval": "Abfrageintervall (Sekunden)",
+          "consider_home": "Nachlaufzeit „Zu Hause“ (Sekunden)"
+        },
+        "data_description": {
+          "tracked_ssids": "Ausgewählte SSIDs erzeugen aktivierte Tracker; leer lassen, um alle erkannten SSIDs zu verfolgen. Sie können auch benutzerdefinierte/zeitgesteuerte SSIDs eintragen.",
+          "unselected_ssid_mode": "„Ignorieren“ lässt abgewählte SSIDs vollständig aus; „Deaktivieren“ legt sie deaktiviert im Entitätsregister an.",
+          "track_new_clients": "Deaktivieren, um neu erkannte Clients zunächst deaktiviert anzulegen.",
+          "track_unnamed_clients": "Deaktivieren, um Clients ohne Hostnamen (z. B. viele IoT-Geräte) auszublenden.",
+          "include_wired_clients": "Ausgeschaltet lassen, sofern kabelgebundene Geräte an AP-Ethernet-Ports nicht erfasst werden sollen.",
+          "require_ip": "Clients mit 0.0.0.0 während der Authentifizierung ignorieren.",
+          "min_signal": "Schwache Nachbar-Assoziationen unterhalb dieses SNR-Werts ignorieren (0 deaktiviert den Filter).",
+          "exclude_macs": "Kommagetrennte Liste auszuschließender MAC-Adressen.",
+          "enable_roaming_sensors": "Erstellt zusätzliche Diagnose-Sensoren für Access Point und SSID je Client (standardmäßig aus).",
+          "scan_interval": "Wie oft AP- und Client-Daten von Aruba abgerufen werden (5–300 s).",
+          "consider_home": "Toleranzzeit, bevor ein schlafendes Smartphone als abwesend markiert wird (verhindert WLAN-Energiespar-Flapping)."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Aruba Access Point neu authentifizieren",
+        "description": "Die Anmeldung an **{host}** ist fehlgeschlagen. Bitte geben Sie aktualisierte Zugangsdaten ein.",
+        "data": {
+          "target_host": "Ziel-Access-Point",
+          "username": "Benutzername",
+          "password": "Passwort",
+          "apply_to_all_nodes": "Zugangsdaten auf alle Access Points anwenden"
+        },
+        "data_description": {
+          "apply_to_all_nodes": "Aktualisiert alle konfigurierten APs dieses Multi-AP-Standorts mit diesen Zugangsdaten."
+        }
+      },
+      "reconfigure": {
+        "title": "Multi-AP-Knoten verwalten",
+        "description": "Eigenständige / AOS-10-Access-Points hinzufügen, bearbeiten oder entfernen, ohne verfolgte Client-Entitäten zu verlieren.",
+        "menu_options": {
+          "add_ap": "Access Point hinzufügen",
+          "edit_ap": "Access Point bearbeiten",
+          "remove_ap": "Access Point entfernen"
+        }
+      },
+      "reconfigure_cluster": {
+        "title": "Aruba-Cluster / AP neu konfigurieren",
+        "description": "Verbindungsdaten aktualisieren. Lassen Sie das Passwort leer, um das gespeicherte Passwort beizubehalten.",
+        "data": {
+          "host": "Host oder IP-Adresse",
+          "username": "Benutzername",
+          "password": "Passwort",
+          "transport": "Übertragungsprotokoll"
+        },
+        "data_description": {
+          "password": "Leer lassen, um das aktuell gespeicherte Passwort beizubehalten."
+        },
+        "sections": {
+          "advanced": {
+            "name": "Erweiterte Netzwerkeinstellungen",
+            "description": "Benutzerdefinierte Ports, TLS-Prüfung und Legacy-SSH-Optionen.",
+            "data": {
+              "rest_port": "HTTPS-REST-Port",
+              "ssh_port": "SSH-Port",
+              "verify_ssl": "SSL-Zertifikat überprüfen",
+              "legacy_ssh": "Legacy-SSH-Algorithmen erlauben"
+            },
+            "data_description": {
+              "rest_port": "Standardport der Aruba Instant REST API ist 4343.",
+              "ssh_port": "Standard-SSH-Port ist 22.",
+              "verify_ssl": "Für selbstsignierte Standard-Zertifikate von Aruba deaktiviert lassen.",
+              "legacy_ssh": "Aktivieren für ältere InstantOS-6.x-/-8.x-APs mit SHA-1-Schlüsselaustausch."
+            }
+          }
+        }
+      },
+      "add_ap": {
+        "title": "Access Point hinzufügen",
+        "description": "Einen weiteren eigenständigen / AOS-10-Access-Point hinzufügen. Prüfen Sie anschließend ggf. die Integrationsoptionen, falls neue SSIDs ausgestrahlt werden.",
+        "data": {
+          "host": "Host oder IP-Adresse",
+          "username": "Benutzername",
+          "password": "Passwort",
+          "transport": "Übertragungsprotokoll"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Erweiterte Netzwerkeinstellungen",
+            "description": "Port-, TLS- und SSH-Optionen für den neuen AP.",
+            "data": {
+              "rest_port": "HTTPS-REST-Port",
+              "ssh_port": "SSH-Port",
+              "verify_ssl": "SSL-Zertifikat überprüfen",
+              "legacy_ssh": "Legacy-SSH-Algorithmen erlauben"
+            },
+            "data_description": {
+              "rest_port": "Standardport der Aruba Instant REST API ist 4343.",
+              "ssh_port": "Standard-SSH-Port ist 22.",
+              "verify_ssl": "Für selbstsignierte Standard-Zertifikate von Aruba deaktiviert lassen.",
+              "legacy_ssh": "Aktivieren für ältere InstantOS-6.x-/-8.x-APs mit SHA-1-Schlüsselaustausch."
+            }
+          }
+        }
+      },
+      "edit_ap": {
+        "title": "Access Point zum Bearbeiten wählen",
+        "description": "Wählen Sie den Access Point aus, dessen Einstellungen aktualisiert werden sollen.",
+        "data": {
+          "target_host": "Access Point"
+        }
+      },
+      "edit_ap_details": {
+        "title": "Access Point bearbeiten ({host})",
+        "description": "Verbindungsdaten für **{host}** aktualisieren. Lassen Sie das Passwort leer, um das gespeicherte Passwort beizubehalten.",
+        "data": {
+          "host": "Host oder IP-Adresse",
+          "username": "Benutzername",
+          "password": "Passwort",
+          "transport": "Übertragungsprotokoll"
+        },
+        "data_description": {
+          "password": "Leer lassen, um das aktuell gespeicherte Passwort beizubehalten."
+        },
+        "sections": {
+          "advanced": {
+            "name": "Erweiterte Netzwerkeinstellungen",
+            "description": "Port-, TLS- und SSH-Optionen für {host}.",
+            "data": {
+              "rest_port": "HTTPS-REST-Port",
+              "ssh_port": "SSH-Port",
+              "verify_ssl": "SSL-Zertifikat überprüfen",
+              "legacy_ssh": "Legacy-SSH-Algorithmen erlauben"
+            },
+            "data_description": {
+              "rest_port": "Standardport der Aruba Instant REST API ist 4343.",
+              "ssh_port": "Standard-SSH-Port ist 22.",
+              "verify_ssl": "Für selbstsignierte Standard-Zertifikate von Aruba deaktiviert lassen.",
+              "legacy_ssh": "Aktivieren für ältere InstantOS-6.x-/-8.x-APs mit SHA-1-Schlüsselaustausch."
+            }
+          }
+        }
+      },
+      "remove_ap": {
+        "title": "Access Point entfernen",
+        "description": "Entfernt einen Access Point aus diesem Multi-AP-Standort und löscht dessen AP-Sensoren. Verfolgte Client-Entitäten bleiben erhalten.",
+        "data": {
+          "target_host": "Zu entfernender Access Point"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung zum Aruba-Endpunkt fehlgeschlagen. Host, Port und Erreichbarkeit prüfen.",
+      "cannot_connect_hosts": "Verbindung zu Access Point(s) fehlgeschlagen: {failed_hosts}",
+      "invalid_auth": "Ungültiger Benutzername oder Passwort bzw. unzureichende API-/CLI-Berechtigungen.",
+      "invalid_host": "Bitte eine gültige IP-Adresse oder einen Hostnamen eingeben.",
+      "duplicate_host": "Dieser Access-Point-Host ist in diesem Eintrag bereits konfiguriert.",
+      "empty_hosts": "Bitte mindestens eine AP-IP-Adresse oder einen Hostnamen eingeben.",
+      "password_required": "Passwort eingeben oder AP-spezifische Zugangsdaten aktivieren.",
+      "rest_enable_failed": "REST-API konnte nicht per SSH aktiviert werden (AP evtl. schreibgeschützt / Central-verwaltetes AOS 10). Wählen Sie stattdessen rein lesendes SSH.",
+      "unknown": "Unerwarteter Fehler aufgetreten."
+    },
+    "abort": {
+      "already_configured": "Dieser Aruba-Cluster bzw. Access Point ist bereits konfiguriert.",
+      "reauth_successful": "Erneute Authentifizierung erfolgreich.",
+      "reconfigure_successful": "Access-Point-Konfiguration aktualisiert."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Aruba SSID- & Tracking-Optionen",
+        "description": "Überwachte SSIDs, Client-Filter, Roaming-Sensoren und Abfrageintervalle anpassen.",
+        "data": {
+          "tracked_ssids": "Überwachte SSIDs",
+          "unselected_ssid_mode": "Verhalten bei abgewählten SSIDs",
+          "track_new_clients": "Neu erkannte Clients automatisch verfolgen",
+          "track_unnamed_clients": "Clients ohne Hostnamen verfolgen",
+          "include_wired_clients": "Kabelgebundene AP-Downlink-Clients einbeziehen",
+          "require_ip": "Zugewiesene IPv4-Adresse voraussetzen",
+          "min_signal": "Minimaler SNR-Signalwert",
+          "exclude_macs": "Ausgeschlossene MAC-Adressen",
+          "enable_roaming_sensors": "Client-Roaming-Sensoren erstellen (AP & SSID)",
+          "scan_interval": "Abfrageintervall (Sekunden)",
+          "consider_home": "Nachlaufzeit „Zu Hause“ (Sekunden)"
+        },
+        "data_description": {
+          "tracked_ssids": "Ausgewählte SSIDs erzeugen aktivierte Tracker; leer lassen, um alle erkannten SSIDs zu verfolgen. Sie können auch benutzerdefinierte/zeitgesteuerte SSIDs eintragen.",
+          "unselected_ssid_mode": "„Ignorieren“ lässt abgewählte SSIDs vollständig aus; „Deaktivieren“ legt sie deaktiviert im Entitätsregister an.",
+          "track_new_clients": "Deaktivieren, um neu erkannte Clients zunächst deaktiviert anzulegen.",
+          "track_unnamed_clients": "Deaktivieren, um Clients ohne Hostnamen (z. B. viele IoT-Geräte) auszublenden.",
+          "include_wired_clients": "Ausgeschaltet lassen, sofern kabelgebundene Geräte an AP-Ethernet-Ports nicht erfasst werden sollen.",
+          "require_ip": "Clients mit 0.0.0.0 während der Authentifizierung ignorieren.",
+          "min_signal": "Schwache Nachbar-Assoziationen unterhalb dieses SNR-Werts ignorieren (0 deaktiviert den Filter).",
+          "exclude_macs": "Kommagetrennte Liste auszuschließender MAC-Adressen.",
+          "enable_roaming_sensors": "Erstellt zusätzliche Diagnose-Sensoren für Access Point und SSID je Client.",
+          "scan_interval": "Wie oft AP- und Client-Daten von Aruba abgerufen werden (5–300 s).",
+          "consider_home": "Toleranzzeit, bevor ein schlafendes Smartphone als abwesend markiert wird (verhindert WLAN-Energiespar-Flapping)."
+        }
+      }
+    }
+  },
+  "selector": {
+    "transport": {
+      "options": {
+        "auto": "Auto (HTTPS REST :4343 -> SSH :22 Fallback)",
+        "rest": "HTTPS REST API (:4343)",
+        "ssh": "SSH Nur-Lesen (:22)"
+      }
+    },
+    "confirm_action": {
+      "options": {
+        "enable_rest": "allow-rest-api über SSH aktivieren und HTTPS REST (:4343) nutzen",
+        "ssh_readonly": "AP unverändert lassen und rein lesendes SSH (:22) nutzen"
+      }
+    },
+    "unselected_ssid_mode": {
+      "options": {
+        "ignore": "Vollständig ignorieren (keine Entitäten erstellen)",
+        "disable": "Deaktiviert im Entitätsregister anlegen"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "total_clients": {
+        "name": "Clients gesamt"
+      },
+      "master_ap": {
+        "name": "Master-AP"
+      },
+      "ssid_clients": {
+        "name": "SSID {ssid} Clients"
+      },
+      "ap_clients": {
+        "name": "Clients"
+      },
+      "utilization_5ghz": {
+        "name": "Kanalauslastung 5 GHz"
+      },
+      "utilization_2_4ghz": {
+        "name": "Kanalauslastung 2,4 GHz"
+      },
+      "utilization_6ghz": {
+        "name": "Kanalauslastung 6 GHz"
+      },
+      "uptime": {
+        "name": "Letzter Neustart"
+      },
+      "client_access_point": {
+        "name": "Aruba Access Point"
+      },
+      "client_ssid": {
+        "name": "Aruba SSID"
+      }
+    },
+    "binary_sensor": {
+      "ap_online": {
+        "name": "Online"
+      }
+    },
+    "device_tracker": {
+      "wifi_client": {
+        "name": "Aruba WLAN",
+        "state_attributes": {
+          "essid": {
+            "name": "ESSID"
+          },
+          "access_point": {
+            "name": "Access Point"
+          },
+          "band": {
+            "name": "Frequenzband"
+          },
+          "channel": {
+            "name": "Kanal"
+          },
+          "phy_type": {
+            "name": "PHY-Modus"
+          },
+          "signal": {
+            "name": "Signal (SNR)"
+          },
+          "speed_mbps": {
+            "name": "Verbindungsrate (Mbit/s)"
+          },
+          "os": {
+            "name": "Betriebssystem"
+          },
+          "role": {
+            "name": "Rolle"
+          },
+          "ipv6": {
+            "name": "IPv6-Adresse"
+          }
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "ap_auth_failed": {
+      "message": "Authentifizierung für Aruba Access Point(s) fehlgeschlagen: {host}"
+    }
+  }
+}

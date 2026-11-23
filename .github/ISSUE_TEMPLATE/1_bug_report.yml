@@ -1,0 +1,122 @@
+name: Bug report
+description: Report a bug, connection error, or unexpected entity behavior.
+title: "[BUG] "
+labels: ["bug"]
+type: "bug"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing an issue, please verify the problem on the latest release and search [existing issues](https://github.com/MixasikM/ha-aruba-instant/issues).
+        Please review our [contributing guidelines](https://github.com/MixasikM/ha-aruba-instant/blob/main/CONTRIBUTING.md) before submitting.
+
+  - type: markdown
+    attributes:
+      value: |
+        # General information
+
+  - type: textarea
+    id: bug_description
+    attributes:
+      label: Bug description
+      description: Clearly describe the issue you are experiencing.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List the steps needed to reproduce the issue.
+      placeholder: |
+        1. Configure topology / transport...
+        2. Trigger poll or reload...
+        3. Observe entity or log error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: Describe what you expected to happen.
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        # Aruba Hardware & Environment
+
+  - type: input
+    id: hardware
+    attributes:
+      label: AP model(s) & firmware
+      placeholder: "e.g. 3x IAP-325 on InstantOS 8.10.0.24, or 2x AP-505 on AOS 10.7"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: topology
+    attributes:
+      label: Deployment topology
+      options:
+        - "Virtual Controller Cluster (IAP)"
+        - "Single Standalone Instant AP"
+        - "Multi-AP Standalone / AOS 10"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Transport mode
+      options:
+        - "Auto"
+        - "HTTPS REST (:4343)"
+        - "SSH Read-Only (:22)"
+    validations:
+      required: true
+
+  - type: input
+    id: versions
+    attributes:
+      label: Home Assistant & integration version
+      placeholder: "e.g. Home Assistant 2026.11.2 / aruba_instant v0.1.5"
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        # Debug information
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics information
+      description: |
+        Go to **Settings -> Devices & Services -> Aruba Instant / AOS Wi-Fi -> ⋮ -> Download diagnostics** and drag-and-drop the downloaded JSON file below (optional if setup failed before adding the entry).
+      placeholder: "Drag-and-drop the downloaded diagnostics JSON file here."
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Paste any relevant Home Assistant logs (enable debug logging if needed).
+      value: |
+        <details><summary>Logs</summary>
+
+        ```text
+        [Paste logs here]
+        ```
+
+        </details>
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: "I confirmed that my logs and text do not contain real passwords, session tokens, or private home IPs/MACs (Download diagnostics JSON is redacted automatically)."
+          required: true

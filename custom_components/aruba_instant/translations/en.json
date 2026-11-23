@@ -1,0 +1,424 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Select Aruba deployment topology",
+        "description": "Choose whether to connect to an Instant Virtual Controller / Single AP or poll multiple Standalone / AOS 10 Access Points as one unified Wi-Fi network.",
+        "menu_options": {
+          "cluster": "Virtual Controller cluster or Single AP",
+          "multi_ap": "Multiple Standalone / AOS 10 APs (no Virtual Controller)"
+        }
+      },
+      "cluster": {
+        "title": "Virtual Controller / Single AP",
+        "description": "Enter the Virtual Controller IP (recommended for Instant clusters) or standalone Access Point address.",
+        "data": {
+          "host": "Host or IP address",
+          "username": "Username",
+          "password": "Password",
+          "transport": "Transport mode"
+        },
+        "data_description": {
+          "host": "Virtual Controller VIP or standalone AP IP/hostname.",
+          "transport": "Auto prefers fast HTTPS REST (:4343) and falls back to SSH (:22)."
+        },
+        "sections": {
+          "advanced": {
+            "name": "Advanced network settings",
+            "description": "Custom ports, TLS certificate verification, and legacy SSH compatibility.",
+            "data": {
+              "rest_port": "HTTPS REST port",
+              "ssh_port": "SSH port",
+              "verify_ssl": "Verify SSL certificate",
+              "legacy_ssh": "Legacy SSH algorithm fallback"
+            },
+            "data_description": {
+              "rest_port": "Default Aruba Instant REST API port is 4343.",
+              "ssh_port": "Default SSH port is 22.",
+              "verify_ssl": "Keep disabled for default self-signed Aruba certificates.",
+              "legacy_ssh": "Enable for older InstantOS 6.x / early 8.x APs requiring SHA-1 KEX."
+            }
+          }
+        }
+      },
+      "multi_ap": {
+        "title": "Multiple Standalone / AOS 10 APs",
+        "description": "Add each Access Point IP or hostname. Clients roaming between APs are merged into a single device_tracker entity.",
+        "data": {
+          "network_name": "Network / site name",
+          "hosts": "Access Point hosts / IPs",
+          "separate_credentials_per_ap": "Access Points use different credentials",
+          "username": "Default username",
+          "password": "Default password",
+          "transport": "Default transport mode"
+        },
+        "data_description": {
+          "network_name": "Display name for this unified Wi-Fi hub (used in Aruba 'Site' entities).",
+          "hosts": "Enter one or more AP IP addresses or hostnames.",
+          "separate_credentials_per_ap": "Enable if each AP has its own username or password (such as factory Serial Number passwords).",
+          "password": "Required unless per-AP credentials are enabled above."
+        },
+        "sections": {
+          "advanced": {
+            "name": "Advanced network settings",
+            "description": "Default ports, TLS verification, and legacy SSH compatibility for added APs.",
+            "data": {
+              "rest_port": "HTTPS REST port",
+              "ssh_port": "SSH port",
+              "verify_ssl": "Verify SSL certificate",
+              "legacy_ssh": "Legacy SSH algorithm fallback"
+            },
+            "data_description": {
+              "rest_port": "Default Aruba Instant REST API port is 4343.",
+              "ssh_port": "Default SSH port is 22.",
+              "verify_ssl": "Keep disabled for default self-signed Aruba certificates.",
+              "legacy_ssh": "Enable for older InstantOS 6.x / early 8.x APs requiring SHA-1 KEX."
+            }
+          }
+        }
+      },
+      "ap_credentials": {
+        "title": "Credentials for Access Point ({index}/{total})",
+        "description": "Enter credentials for Access Point **{host}**.",
+        "data": {
+          "username": "Username",
+          "password": "Password",
+          "transport": "Transport mode"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Advanced network settings",
+            "description": "Port, TLS, and SSH options for {host}.",
+            "data": {
+              "rest_port": "HTTPS REST port",
+              "ssh_port": "SSH port",
+              "verify_ssl": "Verify SSL certificate",
+              "legacy_ssh": "Legacy SSH algorithm fallback"
+            },
+            "data_description": {
+              "rest_port": "Default Aruba Instant REST API port is 4343.",
+              "ssh_port": "Default SSH port is 22.",
+              "verify_ssl": "Keep disabled for default self-signed Aruba certificates.",
+              "legacy_ssh": "Enable for older InstantOS 6.x / early 8.x APs requiring SHA-1 KEX."
+            }
+          }
+        }
+      },
+      "confirm_enable_rest": {
+        "title": "REST API disabled on {host}",
+        "description": "HTTPS REST API (:4343) on **{host}** returned HTTP 503 (`REST API Service is not enabled`).\n\nEnabling REST API will execute these exact CLI commands over SSH (`:22`):\n`configure terminal` -> `allow-rest-api` -> `end` -> `commit apply` -> `write memory`\n\nChoose whether to apply that configuration change or leave the AP untouched and run strictly read-only over SSH.",
+        "data": {
+          "confirm_action": "Action"
+        }
+      },
+      "filters": {
+        "title": "SSID & client tracking filters",
+        "description": "Select which SSIDs and Wi-Fi clients should create Home Assistant entities.",
+        "data": {
+          "tracked_ssids": "Tracked SSIDs",
+          "unselected_ssid_mode": "Unselected SSID behavior",
+          "track_new_clients": "Automatically track newly discovered clients",
+          "track_unnamed_clients": "Track clients without a hostname",
+          "include_wired_clients": "Include wired AP downlink clients",
+          "require_ip": "Require assigned IPv4 address",
+          "min_signal": "Minimum SNR signal threshold",
+          "exclude_macs": "Excluded MAC addresses",
+          "enable_roaming_sensors": "Create per-client roaming sensors (AP & SSID)",
+          "scan_interval": "Polling interval (seconds)",
+          "consider_home": "Consider home duration (seconds)"
+        },
+        "data_description": {
+          "tracked_ssids": "Selected SSIDs create enabled trackers; leave empty to track all discovered SSIDs. You can also type custom/scheduled SSIDs.",
+          "unselected_ssid_mode": "Ignore skips unselected SSIDs completely; Disable registers them disabled in the Entity Registry.",
+          "track_new_clients": "Disable to create newly seen clients disabled until manually enabled.",
+          "track_unnamed_clients": "Disable to ignore clients with an empty hostname (common for IoT devices).",
+          "include_wired_clients": "Keep off unless you want wired Ethernet devices plugged into AP downlink ports.",
+          "require_ip": "Ignore clients showing 0.0.0.0 while authenticating.",
+          "min_signal": "Ignore weak neighbor associations below this SNR value (0 disables).",
+          "exclude_macs": "Comma-separated list of MAC addresses to exclude completely.",
+          "enable_roaming_sensors": "Adds diagnostic Access Point and SSID sensors per client (disabled by default to reduce entity count).",
+          "scan_interval": "How often to poll Aruba for AP and client updates (5–300 s).",
+          "consider_home": "Grace period before marking a sleeping smartphone away (prevents Wi-Fi power-save flapping)."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate Aruba Access Point",
+        "description": "Authentication failed on **{host}**. Please enter updated credentials.",
+        "data": {
+          "target_host": "Target Access Point",
+          "username": "Username",
+          "password": "Password",
+          "apply_to_all_nodes": "Apply credentials to all Access Points"
+        },
+        "data_description": {
+          "apply_to_all_nodes": "Update every configured AP in this Multi-AP site with these credentials."
+        }
+      },
+      "reconfigure": {
+        "title": "Manage Multi-AP nodes",
+        "description": "Add, edit, or remove Standalone / AOS 10 Access Points without losing tracked client entities.",
+        "menu_options": {
+          "add_ap": "Add Access Point",
+          "edit_ap": "Edit Access Point",
+          "remove_ap": "Remove Access Point"
+        }
+      },
+      "reconfigure_cluster": {
+        "title": "Reconfigure Aruba cluster / AP",
+        "description": "Update connection details. Leave password blank to keep the existing password.",
+        "data": {
+          "host": "Host or IP address",
+          "username": "Username",
+          "password": "Password",
+          "transport": "Transport mode"
+        },
+        "data_description": {
+          "password": "Leave blank to keep the currently saved password."
+        },
+        "sections": {
+          "advanced": {
+            "name": "Advanced network settings",
+            "description": "Custom ports, TLS verification, and legacy SSH options.",
+            "data": {
+              "rest_port": "HTTPS REST port",
+              "ssh_port": "SSH port",
+              "verify_ssl": "Verify SSL certificate",
+              "legacy_ssh": "Legacy SSH algorithm fallback"
+            },
+            "data_description": {
+              "rest_port": "Default Aruba Instant REST API port is 4343.",
+              "ssh_port": "Default SSH port is 22.",
+              "verify_ssl": "Keep disabled for default self-signed Aruba certificates.",
+              "legacy_ssh": "Enable for older InstantOS 6.x / early 8.x APs requiring SHA-1 KEX."
+            }
+          }
+        }
+      },
+      "add_ap": {
+        "title": "Add Access Point",
+        "description": "Add another Standalone / AOS 10 Access Point. Check integration Options afterwards if this AP broadcasts new SSIDs.",
+        "data": {
+          "host": "Host or IP address",
+          "username": "Username",
+          "password": "Password",
+          "transport": "Transport mode"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Advanced network settings",
+            "description": "Port, TLS, and SSH options for the new AP.",
+            "data": {
+              "rest_port": "HTTPS REST port",
+              "ssh_port": "SSH port",
+              "verify_ssl": "Verify SSL certificate",
+              "legacy_ssh": "Legacy SSH algorithm fallback"
+            },
+            "data_description": {
+              "rest_port": "Default Aruba Instant REST API port is 4343.",
+              "ssh_port": "Default SSH port is 22.",
+              "verify_ssl": "Keep disabled for default self-signed Aruba certificates.",
+              "legacy_ssh": "Enable for older InstantOS 6.x / early 8.x APs requiring SHA-1 KEX."
+            }
+          }
+        }
+      },
+      "edit_ap": {
+        "title": "Select Access Point to edit",
+        "description": "Choose which Access Point node you want to update.",
+        "data": {
+          "target_host": "Access Point"
+        }
+      },
+      "edit_ap_details": {
+        "title": "Edit Access Point ({host})",
+        "description": "Update connection details for **{host}**. Leave password blank to keep the existing password.",
+        "data": {
+          "host": "Host or IP address",
+          "username": "Username",
+          "password": "Password",
+          "transport": "Transport mode"
+        },
+        "data_description": {
+          "password": "Leave blank to keep the currently saved password."
+        },
+        "sections": {
+          "advanced": {
+            "name": "Advanced network settings",
+            "description": "Port, TLS, and SSH options for {host}.",
+            "data": {
+              "rest_port": "HTTPS REST port",
+              "ssh_port": "SSH port",
+              "verify_ssl": "Verify SSL certificate",
+              "legacy_ssh": "Legacy SSH algorithm fallback"
+            },
+            "data_description": {
+              "rest_port": "Default Aruba Instant REST API port is 4343.",
+              "ssh_port": "Default SSH port is 22.",
+              "verify_ssl": "Keep disabled for default self-signed Aruba certificates.",
+              "legacy_ssh": "Enable for older InstantOS 6.x / early 8.x APs requiring SHA-1 KEX."
+            }
+          }
+        }
+      },
+      "remove_ap": {
+        "title": "Remove Access Point",
+        "description": "Remove an Access Point from this Multi-AP site and delete its AP sensors. Tracked Wi-Fi client entities remain intact.",
+        "data": {
+          "target_host": "Access Point to remove"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the Aruba endpoint. Verify host, port, and network reachability.",
+      "cannot_connect_hosts": "Failed to connect to Access Point(s): {failed_hosts}",
+      "invalid_auth": "Invalid username or password, or insufficient API/CLI privileges.",
+      "invalid_host": "Enter a valid IP address or hostname.",
+      "duplicate_host": "This Access Point host is already configured in this entry.",
+      "empty_hosts": "Enter at least one Access Point IP or hostname.",
+      "password_required": "Enter a password or enable per-AP credentials.",
+      "rest_enable_failed": "Could not enable REST API over SSH (the AP may be read-only / AOS 10 Central-managed). Choose read-only SSH instead.",
+      "unknown": "Unexpected error occurred."
+    },
+    "abort": {
+      "already_configured": "This Aruba cluster or Access Point is already configured.",
+      "reauth_successful": "Reauthentication succeeded.",
+      "reconfigure_successful": "Access Point configuration updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Aruba SSID & tracking options",
+        "description": "Adjust tracked SSIDs, client filters, roaming sensors, and polling timers.",
+        "data": {
+          "tracked_ssids": "Tracked SSIDs",
+          "unselected_ssid_mode": "Unselected SSID behavior",
+          "track_new_clients": "Automatically track newly discovered clients",
+          "track_unnamed_clients": "Track clients without a hostname",
+          "include_wired_clients": "Include wired AP downlink clients",
+          "require_ip": "Require assigned IPv4 address",
+          "min_signal": "Minimum SNR signal threshold",
+          "exclude_macs": "Excluded MAC addresses",
+          "enable_roaming_sensors": "Create per-client roaming sensors (AP & SSID)",
+          "scan_interval": "Polling interval (seconds)",
+          "consider_home": "Consider home duration (seconds)"
+        },
+        "data_description": {
+          "tracked_ssids": "Selected SSIDs create enabled trackers; leave empty to track all discovered SSIDs. You can also type custom/scheduled SSIDs.",
+          "unselected_ssid_mode": "Ignore skips unselected SSIDs completely; Disable registers them disabled in the Entity Registry.",
+          "track_new_clients": "Disable to create newly seen clients disabled until manually enabled.",
+          "track_unnamed_clients": "Disable to ignore clients with an empty hostname (common for IoT devices).",
+          "include_wired_clients": "Keep off unless you want wired Ethernet devices plugged into AP downlink ports.",
+          "require_ip": "Ignore clients showing 0.0.0.0 while authenticating.",
+          "min_signal": "Ignore weak neighbor associations below this SNR value (0 disables).",
+          "exclude_macs": "Comma-separated list of MAC addresses to exclude completely.",
+          "enable_roaming_sensors": "Adds diagnostic Access Point and SSID sensors per client.",
+          "scan_interval": "How often to poll Aruba for AP and client updates (5–300 s).",
+          "consider_home": "Grace period before marking a sleeping smartphone away (prevents Wi-Fi power-save flapping)."
+        }
+      }
+    }
+  },
+  "selector": {
+    "transport": {
+      "options": {
+        "auto": "Auto (HTTPS REST :4343 -> SSH :22 fallback)",
+        "rest": "HTTPS REST API (:4343)",
+        "ssh": "SSH Read-Only (:22)"
+      }
+    },
+    "confirm_action": {
+      "options": {
+        "enable_rest": "Enable allow-rest-api via SSH and use HTTPS REST (:4343)",
+        "ssh_readonly": "Keep AP config untouched and use read-only SSH (:22)"
+      }
+    },
+    "unselected_ssid_mode": {
+      "options": {
+        "ignore": "Ignore completely (do not create entities)",
+        "disable": "Create disabled in Entity Registry"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "total_clients": {
+        "name": "Total clients"
+      },
+      "master_ap": {
+        "name": "Master AP"
+      },
+      "ssid_clients": {
+        "name": "SSID {ssid} clients"
+      },
+      "ap_clients": {
+        "name": "Clients"
+      },
+      "utilization_5ghz": {
+        "name": "5 GHz utilization"
+      },
+      "utilization_2_4ghz": {
+        "name": "2.4 GHz utilization"
+      },
+      "utilization_6ghz": {
+        "name": "6 GHz utilization"
+      },
+      "uptime": {
+        "name": "Last restart"
+      },
+      "client_access_point": {
+        "name": "Aruba Access Point"
+      },
+      "client_ssid": {
+        "name": "Aruba SSID"
+      }
+    },
+    "binary_sensor": {
+      "ap_online": {
+        "name": "Online"
+      }
+    },
+    "device_tracker": {
+      "wifi_client": {
+        "name": "Aruba Wi-Fi",
+        "state_attributes": {
+          "essid": {
+            "name": "ESSID"
+          },
+          "access_point": {
+            "name": "Access Point"
+          },
+          "band": {
+            "name": "Frequency band"
+          },
+          "channel": {
+            "name": "Channel"
+          },
+          "phy_type": {
+            "name": "PHY mode"
+          },
+          "signal": {
+            "name": "Signal (SNR)"
+          },
+          "speed_mbps": {
+            "name": "Link speed (Mbps)"
+          },
+          "os": {
+            "name": "Operating system"
+          },
+          "role": {
+            "name": "Role"
+          },
+          "ipv6": {
+            "name": "IPv6 address"
+          }
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "ap_auth_failed": {
+      "message": "Authentication failed for Aruba Access Point(s): {host}"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "domain": "aruba_instant",
+  "name": "Aruba Instant / AOS Wi-Fi",
+  "categories": [
+    "computers_network.routers_network",
+    "presence_location.network_presence"
+  ],
+  "codeowners": ["@MixasikM"],
+  "config_flow": true,
+  "documentation": "https://github.com/MixasikM/ha-aruba-instant",
+  "integration_type": "hub",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/MixasikM/ha-aruba-instant/issues",
+  "loggers": ["asyncssh"],
+  "requirements": ["asyncssh>=2.14.2"],
+  "version": "0.1.5"
+}

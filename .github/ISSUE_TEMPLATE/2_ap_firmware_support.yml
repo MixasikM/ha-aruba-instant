@@ -1,0 +1,79 @@
+name: AP / Firmware support request
+description: Request support for an unsupported Aruba AP model, firmware version, or CLI output format.
+title: "[AP Support] "
+labels: ["enhancement"]
+type: "feature"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search [existing issues](https://github.com/MixasikM/ha-aruba-instant/issues) first.
+        If sharing sample CLI outputs manually, sanitize IPs (`192.0.2.x`), MACs (`aa:bb:cc:11:22:33`), serial numbers, and SSIDs (`CorpWiFi`).
+
+  - type: markdown
+    attributes:
+      value: |
+        # Aruba Hardware & Firmware
+
+  - type: input
+    id: hardware
+    attributes:
+      label: AP model(s) & firmware
+      placeholder: "e.g. AP-655 on InstantOS 8.13, or IAP-205 on InstantOS 6.5"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: topology_transport
+    attributes:
+      label: Topology & transport
+      options:
+        - "Virtual Controller Cluster — Auto / HTTPS REST (:4343)"
+        - "Virtual Controller Cluster — SSH (:22)"
+        - "Single Standalone Instant AP — Auto / REST / SSH"
+        - "Multi-AP Standalone / AOS 10 — REST / SSH"
+    validations:
+      required: true
+
+  - type: textarea
+    id: details
+    attributes:
+      label: What is missing or not working?
+      description: Describe any missing sensors, misaligned columns, unrecognized radio bands, or CLI prompt differences.
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        # Diagnostics or Sanitized CLI Sample
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics file
+      description: |
+        If the integration loads, attach **Download diagnostics** from **Settings -> Devices & Services -> Aruba Instant / AOS Wi-Fi -> ⋮ -> Download diagnostics**.
+      placeholder: "Drag-and-drop the downloaded diagnostics JSON file here."
+
+  - type: textarea
+    id: cli_sample
+    attributes:
+      label: Sanitized CLI output (optional)
+      description: If helpful, paste sanitized outputs of `show summary`, `show network`, `show aps`, or `show clients`.
+      value: |
+        <details><summary>Sanitized CLI output</summary>
+
+        ```text
+        [Paste sanitized CLI output here]
+        ```
+
+        </details>
+
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: "I replaced any real home IPs, MAC addresses, serial numbers, and SSIDs with synthetic placeholders (or attached redacted Download diagnostics)."
+          required: true
