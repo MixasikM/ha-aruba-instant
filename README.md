@@ -51,16 +51,18 @@ Local Wi-Fi presence detection and real-time access point telemetry for HPE Arub
 
 ## Installation
 
-### Option 1: Custom Repository (via Home Assistant UI / MY Button)
+### Option 1: Home Assistant Marketplace / HACS (Recommended)
 
-Click the button below to add this custom repository directly in your Home Assistant instance:
+Click the button below to open **Aruba Instant / AOS Wi-Fi** directly in your Home Assistant instance:
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=MixasikM&repository=ha-aruba-instant&category=integration)
 
-Or add it manually as a custom integration repository:
-1. Open **Settings -> Marketplace** (or **HACS -> Integrations**) -> top-right menu -> **Custom repositories**.
-2. Enter `https://github.com/MixasikM/ha-aruba-instant`, select category **Integration**, and click **Add**.
-3. Download **Aruba Instant / AOS Wi-Fi** and restart Home Assistant (`2026.11.0+`).
+Or install it from the default catalog in the Home Assistant UI:
+1. Open **Settings -> Marketplace** (or **HACS -> Integrations**).
+2. Search for **Aruba Instant / AOS Wi-Fi** and install it (`Home Assistant 2026.11.0+`).
+3. Proceed to **Setup & Configuration** below *(restarting Home Assistant is only needed when updating an already loaded version)*.
+
+> **Fallback — Custom Repository:** If your local catalog index has not synced yet, open **Settings -> Marketplace** (or **HACS -> Integrations**) -> top-right menu -> **Custom repositories**, add `https://github.com/MixasikM/ha-aruba-instant` with category **Integration**, and install **Aruba Instant / AOS Wi-Fi**.
 
 ### Option 2: Manual Installation
 
