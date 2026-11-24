@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from homeassistant.components.sensor import (
     DOMAIN as SENSOR_DOMAIN,
@@ -45,8 +46,11 @@ async def async_setup_entry(
         ArubaClusterTotalClientsSensor(coordinator, site_name, hub_info)
     ]
     if topology_mode == TOPOLOGY_CLUSTER:
-        static_entities.append(
-            ArubaClusterMasterApSensor(coordinator, site_name, hub_info)
+        static_entities.extend(
+            [
+                ArubaClusterMasterApSensor(coordinator, site_name, hub_info),
+                ArubaClusterFirmwareSensor(coordinator, site_name, hub_info),
+            ]
         )
     async_add_entities(static_entities)
 
@@ -125,6 +129,9 @@ async def async_setup_entry(
                 ("clients", ArubaApClientsSensor),
                 ("5ghz_util", ArubaAp5GhzUtilSensor),
                 ("24ghz_util", ArubaAp24GhzUtilSensor),
+                ("5ghz_channel", ArubaAp5GhzChannelSensor),
+                ("24ghz_channel", ArubaAp24GhzChannelSensor),
+                ("firmware", ArubaApFirmwareSensor),
                 ("uptime", ArubaApUptimeSensor),
             ]
             for metric_key, cls in base_sensors:
@@ -136,12 +143,16 @@ async def async_setup_entry(
                     new_entities.append(ent)
 
             if ap.radio_6ghz_channel or ap.radio_6ghz_utilization is not None:
-                uid_6g = f"{ap_key}:6ghz_util"
-                if uid_6g not in added_ap_keys:
-                    added_ap_keys.add(uid_6g)
-                    ent_6g = ArubaAp6GhzUtilSensor(coordinator, ap, ap_info)
-                    ent_6g.async_on_remove(lambda k=uid_6g: added_ap_keys.discard(k))
-                    new_entities.append(ent_6g)
+                for metric_key_6g, cls_6g in (
+                    ("6ghz_util", ArubaAp6GhzUtilSensor),
+                    ("6ghz_channel", ArubaAp6GhzChannelSensor),
+                ):
+                    uid_6g = f"{ap_key}:{metric_key_6g}"
+                    if uid_6g not in added_ap_keys:
+                        added_ap_keys.add(uid_6g)
+                        ent_6g = cls_6g(coordinator, ap, ap_info)  # type: ignore[call-arg]
+                        ent_6g.async_on_remove(lambda k=uid_6g: added_ap_keys.discard(k))
+                        new_entities.append(ent_6g)
 
         # 3. Opt-in diagnostic client roaming sensors
         if coordinator.enable_roaming_sensors:
@@ -223,6 +234,55 @@ class ArubaClusterMasterApSensor(ArubaCoordinatorEntity, SensorEntity):
         if self.coordinator.data is None:
             return None
         return self.coordinator.data.master_ap_name
+
+
+class ArubaClusterFirmwareSensor(ArubaCoordinatorEntity, SensorEntity):
+    """Active firmware version and partition/DRT details for the Virtual Controller cluster."""
+
+    _attr_translation_key = "cluster_firmware"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: ArubaDataUpdateCoordinator,
+        site_name: str,
+        hub_info: dr.DeviceInfo,
+    ) -> None:
+        entry_id = coordinator.config_entry.entry_id
+        super().__init__(
+            coordinator=coordinator,
+            platform_domain=SENSOR_DOMAIN,
+            object_id_slug=f"{site_name}_firmware",
+            unique_id=f"{entry_id}_firmware",
+            device_info=hub_info,
+        )
+
+    @property
+    def native_value(self) -> str | None:
+        snap = self.coordinator.data
+        if snap is None:
+            return None
+        if snap.firmware_info and snap.firmware_info.primary_version:
+            return snap.firmware_info.primary_version
+        return snap.summary.version
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        snap = self.coordinator.data
+        if snap is None or snap.firmware_info is None:
+            return {}
+        fw = snap.firmware_info
+        chk = snap.firmware_check
+        return {
+            "backup_firmware": fw.backup_version,
+            "primary_build_time": fw.primary_build_time,
+            "backup_build_time": fw.backup_build_time,
+            "image_classes": list(fw.image_classes) if fw.image_classes else None,
+            "model_version": fw.model_version_line,
+            "last_reboot_cause": fw.last_reboot_cause,
+            "upgrade_in_progress": fw.upgrade_in_progress,
+            "drt_version": chk.new_drt_version if chk else None,
+        }
 
 
 class ArubaSsidClientsSensor(ArubaCoordinatorEntity, SensorEntity):
@@ -381,6 +441,108 @@ class ArubaAp6GhzUtilSensor(_BaseArubaApSensor):
         return ap.radio_6ghz_utilization if ap is not None else None
 
 
+class ArubaAp5GhzChannelSensor(_BaseArubaApSensor):
+    """5 GHz radio channel sensor on a physical Access Point (recorded for ARM history)."""
+
+    _attr_translation_key = "channel_5ghz"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: ArubaDataUpdateCoordinator,
+        ap: AccessPoint,
+        ap_info: dr.DeviceInfo,
+    ) -> None:
+        super().__init__(coordinator, ap, ap_info, "5ghz_channel", "5ghz_channel")
+
+    @property
+    def native_value(self) -> str | None:
+        ap = self._current_ap()
+        if ap is None or not ap.radio_5ghz_channel or ap.radio_5ghz_channel == "--":
+            return None
+        return ap.radio_5ghz_channel
+
+
+class ArubaAp24GhzChannelSensor(_BaseArubaApSensor):
+    """2.4 GHz radio channel sensor on a physical Access Point (recorded for ARM history)."""
+
+    _attr_translation_key = "channel_2_4ghz"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: ArubaDataUpdateCoordinator,
+        ap: AccessPoint,
+        ap_info: dr.DeviceInfo,
+    ) -> None:
+        super().__init__(coordinator, ap, ap_info, "2_4ghz_channel", "24ghz_channel")
+
+    @property
+    def native_value(self) -> str | None:
+        ap = self._current_ap()
+        if ap is None or not ap.radio_2_4ghz_channel or ap.radio_2_4ghz_channel == "--":
+            return None
+        return ap.radio_2_4ghz_channel
+
+
+class ArubaAp6GhzChannelSensor(_BaseArubaApSensor):
+    """6 GHz radio channel sensor on Wi-Fi 6E/7 Access Points (recorded for ARM history)."""
+
+    _attr_translation_key = "channel_6ghz"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: ArubaDataUpdateCoordinator,
+        ap: AccessPoint,
+        ap_info: dr.DeviceInfo,
+    ) -> None:
+        super().__init__(coordinator, ap, ap_info, "6ghz_channel", "6ghz_channel")
+
+    @property
+    def native_value(self) -> str | None:
+        ap = self._current_ap()
+        if ap is None or not ap.radio_6ghz_channel or ap.radio_6ghz_channel == "--":
+            return None
+        return ap.radio_6ghz_channel
+
+
+class ArubaApFirmwareSensor(_BaseArubaApSensor):
+    """Per-AP active firmware, backup partition, AP image class, serial, and MAC diagnostics."""
+
+    _attr_translation_key = "ap_firmware"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: ArubaDataUpdateCoordinator,
+        ap: AccessPoint,
+        ap_info: dr.DeviceInfo,
+    ) -> None:
+        super().__init__(coordinator, ap, ap_info, "firmware", "firmware")
+
+    @property
+    def native_value(self) -> str | None:
+        ap = self._current_ap()
+        if ap is None:
+            return None
+        return ap.primary_firmware or ap.sw_version
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        ap = self._current_ap()
+        if ap is None:
+            return {}
+        return {
+            "backup_firmware": ap.backup_firmware,
+            "ap_class": ap.ap_class,
+            "upgrade_status": ap.upgrade_status,
+            "upgrade_error": ap.upgrade_error,
+            "serial_number": ap.serial if ap.serial and ap.serial not in ("-", "--") else None,
+            "mac_address": dr.format_mac(ap.mac) if ap.mac else None,
+        }
+
+
 class ArubaApUptimeSensor(_BaseArubaApSensor):
     """Last-boot timestamp sensor with 120s jitter suppression to prevent Recorder bloat."""
 
@@ -417,6 +579,13 @@ class ArubaApUptimeSensor(_BaseArubaApSensor):
         ):
             self._cached_boot_dt = computed_boot
         return self._cached_boot_dt
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        ap = self._current_ap()
+        if ap is None or not ap.last_reboot_cause:
+            return {}
+        return {"last_reboot_cause": ap.last_reboot_cause}
 
 
 class _BaseClientRoamingSensor(ArubaCoordinatorEntity, SensorEntity):

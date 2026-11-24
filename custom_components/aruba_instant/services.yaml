@@ -1,0 +1,54 @@
+purge_stale_clients:
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: aruba_instant
+    stale_days:
+      required: false
+      default: 30
+      selector:
+        number:
+          min: 1
+          max: 3650
+          unit_of_measurement: d
+          mode: box
+    ssid:
+      required: false
+      example: "Guest WiFi"
+      selector:
+        text:
+    skip_person_bound:
+      required: false
+      default: true
+      selector:
+        boolean:
+    dry_run:
+      required: false
+      default: true
+      selector:
+        boolean:
+
+upgrade_firmware:
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: aruba_instant
+    image_url:
+      required: true
+      example: "http://192.0.2.10/ArubaInstant_Hercules_8.10.0.24_97188"
+      selector:
+        text:
+    ap_class:
+      required: false
+      example: "Hercules"
+      selector:
+        text:
+    auto_reboot:
+      required: false
+      default: true
+      selector:
+        boolean:

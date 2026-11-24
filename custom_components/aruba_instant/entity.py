@@ -44,8 +44,9 @@ def build_ap_device_info(
         via_device_id=runtime_data.cluster_device_id,
         manufacturer="Hewlett Packard Enterprise / Aruba",
         model=ap.model or None,
+        hw_version=ap.ap_class or None,
         serial_number=ap.serial if ap.serial and ap.serial not in ("-", "--") else None,
-        sw_version=ap.sw_version,
+        sw_version=ap.primary_firmware or ap.sw_version,
         name=display,
     )
 

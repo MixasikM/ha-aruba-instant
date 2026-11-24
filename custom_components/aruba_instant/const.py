@@ -13,6 +13,9 @@ PLATFORMS: list[Platform] = [
     Platform.DEVICE_TRACKER,
     Platform.SENSOR,
     Platform.BINARY_SENSOR,
+    Platform.UPDATE,
+    Platform.BUTTON,
+    Platform.SWITCH,
 ]
 
 # Topology & transport modes
@@ -64,6 +67,7 @@ CONF_REQUIRE_IP = "require_ip"
 CONF_MIN_SIGNAL = "min_signal"
 CONF_EXCLUDE_MACS = "exclude_macs"
 CONF_ENABLE_ROAMING_SENSORS = "enable_roaming_sensors"
+CONF_ENABLE_WRITE_CONTROLS = "enable_write_controls"
 CONF_SCAN_INTERVAL = "scan_interval"
 CONF_CONSIDER_HOME = "consider_home"
 
@@ -72,3 +76,8 @@ UNSELECTED_SSID_DISABLE = "disable"
 
 UPTIME_BOOT_DRIFT_TOLERANCE_SECONDS = 120
 MAX_TRANSIENT_POLL_FAILURES: Final = 2
+DEFAULT_FIRMWARE_REFRESH_SECONDS: Final = 1800
+ACTIVE_UPGRADE_FIRMWARE_REFRESH_SECONDS: Final = 30
+
+SERVICE_PURGE_STALE_CLIENTS: Final = "purge_stale_clients"
+SERVICE_UPGRADE_FIRMWARE: Final = "upgrade_firmware"

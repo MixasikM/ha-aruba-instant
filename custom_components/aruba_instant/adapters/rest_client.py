@@ -12,14 +12,23 @@ from typing import Any
 
 import aiohttp
 
-from ..engine.models import ClusterSnapshot
-from ..engine.parsers import build_snapshot, parse_summary
+from ..engine.models import ClusterSnapshot, FirmwareCheckResult, FirmwareImageInfo
+from ..engine.parsers import (
+    build_firmware_info,
+    build_snapshot,
+    parse_image_check_xml,
+    parse_summary,
+)
 from ..ports.cluster_client import (
     ArubaAuthError,
+    ArubaClientError,
     ArubaConnectionError,
+    ArubaReadOnlyCliError,
     ArubaRestApiDisabledError,
     BaseArubaClusterClient,
 )
+
+_INVALID_ARG_RE = re.compile(r"[\r\n\"']")
 
 _REST_DISABLED_MARKER = "rest api service is not enabled"
 _AUTH_ERROR_MARKERS = (
@@ -362,3 +371,216 @@ class ArubaRestClient(BaseArubaClusterClient):
             except Exception:
                 # Best-effort logout during unload/shutdown
                 pass
+
+    async def _post_rest_action(
+        self,
+        endpoint: str,
+        payload: dict[str, Any],
+        retry_on_expired: bool = True,
+    ) -> dict[str, Any]:
+        """Execute a mutating `/rest/<endpoint>` POST call with `sid` expiry retry."""
+        if not self._sid:
+            await self._login()
+
+        url = f"{self._base_url}/rest/{endpoint.lstrip('/')}"
+        try:
+            async with self._session.post(
+                url,
+                params={"sid": self._sid or ""},
+                json=payload,
+                allow_redirects=False,
+                timeout=self._timeout,
+            ) as resp:
+                raw_text = await resp.text()
+                if resp.status == 503:
+                    if _REST_DISABLED_MARKER in raw_text.lower():
+                        raise ArubaRestApiDisabledError(
+                            f"REST API Service is not enabled on {self.host}",
+                            host=self.host,
+                        )
+                    raise ArubaConnectionError(
+                        f"HTTP 503 on {self.host}: {raw_text[:200]}",
+                        host=self.host,
+                    )
+                if resp.status in (401, 403):
+                    self._clear_session_state()
+                    if retry_on_expired:
+                        await self._login()
+                        return await self._post_rest_action(endpoint, payload, retry_on_expired=False)
+                    raise ArubaAuthError(
+                        f"REST session rejected on {self.host} (HTTP {resp.status})",
+                        host=self.host,
+                    )
+                if resp.status >= 400:
+                    raise ArubaConnectionError(
+                        f"HTTP {resp.status} calling '/rest/{endpoint}' on {self.host}: {raw_text[:200]}",
+                        host=self.host,
+                    )
+                try:
+                    data = await resp.json(content_type=None)
+                except Exception:
+                    if "invalid session" in raw_text.lower() and retry_on_expired:
+                        self._clear_session_state()
+                        await self._login()
+                        return await self._post_rest_action(endpoint, payload, retry_on_expired=False)
+                    return {}
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as exc:
+            self._clear_session_state()
+            raise ArubaConnectionError(
+                f"REST request '/rest/{endpoint}' failed on {self.host}: {_redact_sid(str(exc))}",
+                host=self.host,
+            ) from exc
+
+        if _is_session_expired_json(data):
+            self._clear_session_state()
+            if retry_on_expired:
+                await self._login()
+                return await self._post_rest_action(endpoint, payload, retry_on_expired=False)
+            raise ArubaAuthError(f"REST session expired on {self.host}", host=self.host)
+
+        if isinstance(data, dict):
+            raw_code = data.get("Status-code")
+            status_str = str(data.get("Status", "")).lower()
+            if status_str == "failed" or raw_code not in (None, 0, "0"):
+                msg = str(data.get("message") or data.get("Reason") or "Command failed")
+                lower_msg = msg.lower()
+                if "invalid opcode" in lower_msg or "privilege" in lower_msg or "read-only" in lower_msg:
+                    raise ArubaReadOnlyCliError(
+                        f"Insufficient REST privileges on {self.host}: {msg}",
+                        host=self.host,
+                    )
+                raise ArubaConnectionError(
+                    f"REST '/rest/{endpoint}' failed on {self.host}: {msg}",
+                    host=self.host,
+                )
+            return data
+        return {}
+
+    async def _fetch_image_check_status(
+        self,
+        *,
+        retry_in_progress: bool = True,
+        retry_on_expired: bool = True,
+    ) -> FirmwareCheckResult | None:
+        """Query `swarm.cgi?opcode=image-check-status` with per-request `Cookie` header."""
+        if not self._sid:
+            await self._login()
+        sid = self._sid or ""
+        url = f"{self._base_url}/swarm.cgi"
+        params = {
+            "opcode": "image-check-status",
+            "ip": "127.0.0.1",
+            "refresh": "false",
+            "sid": sid,
+        }
+        headers = {"Cookie": f"sid={sid}; userType=Admin"}
+        try:
+            async with self._session.get(
+                url,
+                params=params,
+                headers=headers,
+                allow_redirects=False,
+                timeout=self._timeout,
+            ) as resp:
+                if resp.status in (401, 403):
+                    self._clear_session_state()
+                    if retry_on_expired:
+                        await self._login()
+                        return await self._fetch_image_check_status(
+                            retry_in_progress=retry_in_progress,
+                            retry_on_expired=False,
+                        )
+                    return None
+                if resp.status >= 400:
+                    return None
+                raw_xml = await resp.text()
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
+            return None
+
+        parsed = parse_image_check_xml(raw_xml)
+        if parsed.server_state and parsed.server_state.lower() == "in_progress" and retry_in_progress:
+            await asyncio.sleep(1.0)
+            return await self._fetch_image_check_status(
+                retry_in_progress=False,
+                retry_on_expired=retry_on_expired,
+            )
+        return parsed
+
+    async def _optional_show_cmd(self, cmd: str) -> str:
+        """Run an auxiliary read-only show command, degrading cleanly on unsupported CLIs."""
+        try:
+            return await self._show_cmd(cmd)
+        except (ArubaAuthError, ArubaRestApiDisabledError):
+            raise
+        except ArubaClientError:
+            return ""
+
+    async def async_fetch_firmware_details(
+        self,
+    ) -> tuple[FirmwareImageInfo | None, FirmwareCheckResult | None]:
+        """Fetch partition firmware, reboot cause, upgrade status, and image-check XML."""
+        async with self._lock:
+            if not self._sid:
+                await self._login()
+            img_raw = await self._optional_show_cmd("show image version")
+            ver_raw = await self._optional_show_cmd("show version")
+            upg_raw = await self._optional_show_cmd("show upgrade info")
+            fw_info = build_firmware_info(img_raw, ver_raw, upg_raw)
+            fw_check = await self._fetch_image_check_status()
+            return fw_info, fw_check
+
+    async def async_reboot_ap(self, ap_ip: str) -> None:
+        """Reboot a single AP via `POST /rest/reboot`."""
+        target = ap_ip.strip()
+        if not target or _INVALID_ARG_RE.search(target):
+            raise ArubaConnectionError(f"Invalid target AP IP for reboot: {ap_ip!r}", host=self.host)
+        async with self._lock:
+            await self._post_rest_action(
+                "reboot",
+                {"iap_ip_addr": target, "reboot-info": {"target": "single"}},
+            )
+
+    async def async_set_ssid_enabled(self, profile_name: str, enabled: bool) -> None:
+        """Enable or disable a WLAN SSID profile via `POST /rest/ssid`."""
+        profile = profile_name.strip()
+        if not profile or _INVALID_ARG_RE.search(profile):
+            raise ArubaConnectionError(f"Invalid SSID profile name: {profile_name!r}", host=self.host)
+        target_ip = self._target_iap_ip or self._resolved_ip or self.host
+        ssid_payload: dict[str, Any] = {
+            "action": "create",
+            "ssid-profile": profile,
+            "enable" if enabled else "disable": "yes",
+        }
+        async with self._lock:
+            await self._post_rest_action(
+                "ssid",
+                {
+                    "iap_ip_addr": target_ip,
+                    "ssid-profile": ssid_payload,
+                },
+            )
+
+    async def async_upgrade_firmware(
+        self,
+        image_url: str,
+        *,
+        ap_class: str | None = None,
+        auto_reboot: bool = True,
+    ) -> None:
+        """Trigger cluster firmware upgrade from explicit HTTP/HTTPS image URL via `/rest/os-upgrade`."""
+        url_clean = image_url.strip()
+        cls_clean = (ap_class or "").strip()
+        if not url_clean.startswith(("http://", "https://")) or _INVALID_ARG_RE.search(url_clean):
+            raise ArubaConnectionError("Firmware image URL must start with http:// or https://", host=self.host)
+        if not cls_clean or _INVALID_ARG_RE.search(cls_clean):
+            raise ArubaConnectionError("AP image class is required for REST firmware upgrade", host=self.host)
+        async with self._lock:
+            await self._post_rest_action(
+                "os-upgrade",
+                {
+                    "upgrade-info": {
+                        "auto-reboot": "yes" if auto_reboot else "no",
+                        f"{cls_clean}-url": url_clean,
+                    }
+                },
+            )

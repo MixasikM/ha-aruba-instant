@@ -10,8 +10,8 @@ from typing import Any
 
 import asyncssh
 
-from ..engine.models import ClusterSnapshot
-from ..engine.parsers import build_snapshot
+from ..engine.models import ClusterSnapshot, FirmwareCheckResult, FirmwareImageInfo
+from ..engine.parsers import build_firmware_info, build_snapshot
 from ..ports.cluster_client import (
     ArubaAuthError,
     ArubaConnectionError,
@@ -21,6 +21,8 @@ from ..ports.cluster_client import (
 
 # Line-anchored prompt matching typical Aruba CLI prompts (e.g., "MainCluster# ", "AP(config)# ", "AP> ")
 _PROMPT_RE = re.compile(r"(?:^|[\r\n])[^\s#>][^\r\n#>]{0,63}(?:\([a-zA-Z0-9_-]+\))?\s*[#>]\s*$")
+_CONFIRM_YN_RE = re.compile(r"\(y/n\)\s*:?\s*$", re.IGNORECASE)
+_INVALID_CLI_ARG_RE = re.compile(r"[\r\n\"';|]")
 _CLI_ERROR_RE = re.compile(
     r"(?:invalid input|incomplete command|cannot|not allowed|read-only|error:|permission denied)",
     re.IGNORECASE,
@@ -126,6 +128,7 @@ class ArubaSshClient(BaseArubaClusterClient):
         self.port = port
         self.legacy_ssh = legacy_ssh
         self.timeout = timeout
+        self._local_ap_ip: str | None = None
         self._lock = asyncio.Lock()
 
     async def _connect(self) -> Any:
@@ -219,13 +222,16 @@ class ArubaSshClient(BaseArubaClusterClient):
             outputs = await self._run_pty_commands(
                 ["show summary", "show network", "show aps", "show clients"]
             )
-            return build_snapshot(
+            snapshot = build_snapshot(
                 summary_raw=outputs["show summary"],
                 networks_raw=outputs["show network"],
                 aps_raw=outputs["show aps"],
                 clients_raw=outputs["show clients"],
                 fetched_at=datetime.now(timezone.utc),
             )
+            if snapshot.summary.ip_address and snapshot.summary.ip_address not in ("-", "--"):
+                self._local_ap_ip = snapshot.summary.ip_address
+            return snapshot
 
     async def async_enable_rest_api(self) -> None:
         """Explicitly enable `allow-rest-api` over SSH ONLY after user confirmation."""
@@ -268,3 +274,144 @@ class ArubaSshClient(BaseArubaClusterClient):
     async def async_close(self) -> None:
         """No persistent socket held between polls."""
         return None
+
+    async def _run_privileged_commands(self, commands: list[str]) -> list[str]:
+        """Open a privileged `#` SSH PTY, validate each command, and return outputs."""
+        conn = await self._connect()
+        process: Any = None
+        outputs: list[str] = []
+        try:
+            process = await asyncio.wait_for(
+                conn.create_process(
+                    term_type="vt100",
+                    term_size=(512, 1000),
+                ),
+                timeout=self.timeout,
+            )
+            banner = await _read_until_prompt(process, self.timeout, self.host)
+            if banner.rstrip().endswith(">"):
+                raise ArubaReadOnlyCliError(
+                    f"Account on {self.host} lacks privileged '#' enable mode",
+                    host=self.host,
+                )
+
+            for cmd in commands:
+                process.stdin.write(f"{cmd}\n")
+                out = await _read_until_prompt(process, self.timeout, self.host)
+                outputs.append(out)
+                if _CLI_ERROR_RE.search(out):
+                    raise ArubaReadOnlyCliError(
+                        f"CLI rejected '{cmd}' on {self.host}: {out.strip()[:200]}",
+                        host=self.host,
+                    )
+            process.stdin.write("exit\n")
+            return outputs
+        finally:
+            await _safe_close_ssh(conn, process)
+
+    async def async_fetch_firmware_details(
+        self,
+    ) -> tuple[FirmwareImageInfo | None, FirmwareCheckResult | None]:
+        """Fetch firmware partition, reboot cause, and upgrade status over SSH."""
+        async with self._lock:
+            outputs = await self._run_pty_commands(
+                ["show image version", "show version", "show upgrade info"]
+            )
+            return (
+                build_firmware_info(
+                    outputs.get("show image version", ""),
+                    outputs.get("show version", ""),
+                    outputs.get("show upgrade info", ""),
+                ),
+                None,
+            )
+
+    async def async_set_ssid_enabled(self, profile_name: str, enabled: bool) -> None:
+        """Enable or disable a WLAN SSID profile via privileged SSH CLI."""
+        profile = profile_name.strip()
+        if not profile or _INVALID_CLI_ARG_RE.search(profile):
+            raise ArubaConnectionError(f"Invalid SSID profile name: {profile_name!r}", host=self.host)
+        action_cmd = "enable" if enabled else "disable"
+        async with self._lock:
+            await self._run_privileged_commands(
+                [
+                    "configure terminal",
+                    f'wlan ssid-profile "{profile}"',
+                    action_cmd,
+                    "end",
+                    "commit apply",
+                    "write memory",
+                ]
+            )
+
+    async def async_reboot_ap(self, ap_ip: str) -> None:
+        """Reboot the directly connected SSH AP after confirming the `(y/n)` prompt."""
+        target = ap_ip.strip()
+        allowed_targets = {self.host}
+        if self._local_ap_ip:
+            allowed_targets.add(self._local_ap_ip)
+        if target and target not in allowed_targets:
+            raise ArubaReadOnlyCliError(
+                f"SSH reload on {self.host} cannot target cluster member {target}; enable HTTPS REST (:4343)",
+                host=self.host,
+            )
+        async with self._lock:
+            conn = await self._connect()
+            process: Any = None
+            try:
+                process = await asyncio.wait_for(
+                    conn.create_process(
+                        term_type="vt100",
+                        term_size=(512, 1000),
+                    ),
+                    timeout=self.timeout,
+                )
+                banner = await _read_until_prompt(process, self.timeout, self.host)
+                if banner.rstrip().endswith(">"):
+                    raise ArubaReadOnlyCliError(
+                        f"Account on {self.host} lacks privileged '#' enable mode",
+                        host=self.host,
+                    )
+
+                process.stdin.write("reload\n")
+                loop = asyncio.get_running_loop()
+                deadline = loop.time() + self.timeout
+                tail = ""
+                while loop.time() < deadline:
+                    remaining = deadline - loop.time()
+                    chunk = await asyncio.wait_for(process.stdout.read(1024), timeout=remaining)
+                    if not chunk:
+                        break
+                    tail = (tail + chunk)[-256:]
+                    if _CLI_ERROR_RE.search(tail):
+                        raise ArubaReadOnlyCliError(
+                            f"CLI rejected 'reload' on {self.host}: {tail.strip()[:200]}",
+                            host=self.host,
+                        )
+                    if _CONFIRM_YN_RE.search(tail):
+                        process.stdin.write("y\n")
+                        if hasattr(process.stdin, "drain"):
+                            await asyncio.wait_for(process.stdin.drain(), timeout=2.0)
+                        try:
+                            await asyncio.wait_for(process.stdout.read(256), timeout=0.3)
+                        except (asyncio.TimeoutError, Exception):
+                            pass
+                        break
+                    if _PROMPT_RE.search(tail):
+                        break
+            finally:
+                await _safe_close_ssh(conn, process)
+
+    async def async_upgrade_firmware(
+        self,
+        image_url: str,
+        *,
+        ap_class: str | None = None,
+        auto_reboot: bool = True,
+    ) -> None:
+        """Trigger firmware upgrade via privileged SSH CLI `upgrade-image <url>`."""
+        url_clean = image_url.strip()
+        if not url_clean.startswith(("http://", "https://")) or _INVALID_CLI_ARG_RE.search(url_clean):
+            raise ArubaConnectionError("Firmware image URL must start with http:// or https://", host=self.host)
+        async with self._lock:
+            await self._run_privileged_commands([f"upgrade-image {url_clean}"])

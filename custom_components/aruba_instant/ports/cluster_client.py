@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from ..engine.models import ClusterSnapshot
+from ..engine.models import ClusterSnapshot, FirmwareCheckResult, FirmwareImageInfo
 
 
 class ArubaClientError(Exception):
@@ -51,3 +51,27 @@ class BaseArubaClusterClient(ABC):
     @abstractmethod
     async def async_close(self) -> None:
         """Release open sessions, tokens, or network sockets cleanly."""
+
+    async def async_fetch_firmware_details(
+        self,
+    ) -> tuple[FirmwareImageInfo | None, FirmwareCheckResult | None]:
+        """Fetch optional firmware, reboot cause, and image-check details."""
+        return (None, None)
+
+    async def async_reboot_ap(self, ap_ip: str) -> None:
+        """Reboot a single Access Point by IP address (opt-in write operation)."""
+        raise ArubaReadOnlyCliError("AP reboot is not supported by this transport client")
+
+    async def async_set_ssid_enabled(self, profile_name: str, enabled: bool) -> None:
+        """Enable or disable a WLAN SSID profile (opt-in write operation)."""
+        raise ArubaReadOnlyCliError("SSID control is not supported by this transport client")
+
+    async def async_upgrade_firmware(
+        self,
+        image_url: str,
+        *,
+        ap_class: str | None = None,
+        auto_reboot: bool = True,
+    ) -> None:
+        """Trigger firmware upgrade from an explicit HTTP/HTTPS image URL."""
+        raise ArubaReadOnlyCliError("Firmware upgrade is not supported by this transport client")

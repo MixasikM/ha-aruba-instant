@@ -168,3 +168,87 @@ Name         IP Address      MAC Address        OS       ESSID     Access Point 
 Alice-Phone  198.51.100.120  aa:bb:cc:11:22:33  Linux    CorpWiFi  AP-Standalone-2  100E     AX    CorpWiFi  2001:db8::301  44(good)  866(good)
 """
 
+# ---------------------------------------------------------------------------
+# InstantOS firmware, upgrade status, and swarm.cgi XML fixtures (sanitized)
+# ---------------------------------------------------------------------------
+
+SHOW_IMAGE_VERSION_OUTPUT = """cli output: 
+
+COMMAND=show image version
+
+Primary Partition                 :1
+Primary Partition Build Time      :2026-09-26 14:26:57 UTC
+Primary Partition Build Version   :8.10.0.24_97188 LSR (Digitally Signed - Production Build)
+Backup Partition                  :0
+Backup Partition Build Time       :2025-12-9 15:57:38 UTC
+Backup Partition Build Version    :8.10.0.21_94501 LSR (Digitally Signed - Production Build)
+AP Images Classes
+-----------------
+Class
+-----
+Hercules
+"""
+
+SHOW_VERSION_OUTPUT = """cli output: 
+
+COMMAND=show version
+Aruba Operating System Software.
+ArubaOS (MODEL: 325), Version 8.10.0.24 LSR
+Website: http://www.arubanetworks.com
+(c) Copyright 2026 Hewlett Packard Enterprise Development LP.
+Compiled on 2026-09-26 at 14:26:57 UTC (build 97188) by jenkins
+FIPS Mode :disabled
+
+AP uptime is 2 days 1 hour 42 minutes 32 seconds
+Reboot Time and Cause: AP rebooted Sun Nov 22 21:46:35 UTC 2026; System cmd at uptime 50D 3H 10M 48S: Image Upgrade Successful
+"""
+
+SHOW_UPGRADE_INFO_OUTPUT = """cli output: 
+
+COMMAND=show upgrade info
+
+swarm upgrade status
+--------------------
+Mac                IP Address   Seed AP  AP Class  Status    Image Info  Error Detail
+---                ----------   -------  --------  ------    ----------  ------------
+02:00:00:10:00:01  192.0.2.11   Yes      Hercules  image-ok  From Seed   none
+02:00:00:10:00:02  192.0.2.12   No       Hercules  image-ok  From Seed   none
+02:00:00:10:00:03  192.0.2.13   No       Hercules  image-ok  From Seed   none
+Auto reboot           :enable
+Use external URL      :disable
+Conductor wait Time   :0 secs 0 count
+Switch Partition      :enable
+Upgrade in process    :No
+UAP convert process   :No
+"""
+
+IMAGE_CHECK_ERROR_XML = (
+    "<?xml version='1.0'?><re>"
+    '<data name="Image Server State   " pn="true">error</data>'
+    '<data name="Image Server Message " pn="true">Internal error 001 code 2</data>'
+    '<data name="New Image Version    " pn="true"></data>'
+    '<data name="New Image URL        " pn="true"></data>'
+    '<data name="New DRT Version      " pn="true">1.0_97611</data>'
+    '<data name="New DRT URL          " pn="true">https://example.invalid/drt</data>'
+    "</re>"
+)
+
+IMAGE_CHECK_SUCCESS_EMPTY_XML = (
+    "<?xml version='1.0'?><re>"
+    '<data name="Image Server State   " pn="true">success</data>'
+    '<data name="Image Server Message " pn="true">Success</data>'
+    '<data name="New Image Version    " pn="true"></data>'
+    '<data name="New Image URL        " pn="true"></data>'
+    "</re>"
+)
+
+IMAGE_CHECK_UPDATE_XML = (
+    "<?xml version='1.0'?><re>"
+    '<data name="Image Server State   " pn="true">success</data>'
+    '<data name="Image Server Message " pn="true">New version available</data>'
+    '<data name="New Image Version    " pn="true">8.10.0.25_98000</data>'
+    '<data name="New Image URL        " pn="true">http://192.0.2.50/ArubaInstant_Hercules_8.10.0.25_98000</data>'
+    "</re>"
+)
+
+

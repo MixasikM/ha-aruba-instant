@@ -10,10 +10,10 @@
 
 Local Wi-Fi presence detection and real-time access point telemetry for HPE Aruba Instant and AOS Wi-Fi networks in Home Assistant.
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=MixasikM&repository=ha-aruba-instant&category=integration)
+[![Open your Home Assistant instance and open a repository in the Marketplace.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=MixasikM&repository=ha-aruba-instant&category=integration)
 
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2026.11.0%2B-18BCF2.svg)](https://www.home-assistant.io/)
-[![Release](https://img.shields.io/badge/Version-0.1.5-blue.svg)](https://github.com/MixasikM/ha-aruba-instant/releases)
+[![Release](https://img.shields.io/badge/Version-0.2.0-blue.svg)](https://github.com/MixasikM/ha-aruba-instant/releases)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 > **Disclaimer:** This is an independent, unofficial community integration and is not affiliated with, endorsed by, or sponsored by Hewlett Packard Enterprise (HPE) or Aruba Networking. *Aruba*, *Aruba Instant*, *ArubaOS*, and related product names are trademarks of Hewlett Packard Enterprise Development LP. Use at your own risk.
@@ -26,9 +26,9 @@ Local Wi-Fi presence detection and real-time access point telemetry for HPE Arub
 - **Transient-fault resilience:** Tolerates up to 2 consecutive transient poll failures during brief controller failovers without flashing entities `unavailable`.
 - **Flexible deployment topologies:** Supports **Virtual Controller clusters**, **single standalone APs**, and **Multi-AP `AOS 8` / `AOS 10` pools** (including per-AP credentials, mixed REST/SSH nodes, and day-2 **Reconfigure** without losing `person.*` links).
 - **Smart client & SSID filtering:** Pre-fills **Tracked SSIDs** from your APs and filters by **Minimum SNR**, **Require assigned IPv4 address**, **Excluded MAC addresses**, unnamed clients, and **Include wired AP downlink clients** so IoT clutter never floods `device_tracker`.
-- **Cluster, SSID & per-AP telemetry:** Exposes cluster-wide client counts, active Conductor / Master AP, per-SSID client counts, AP connectivity, per-AP client counts, `2.4 / 5 / 6 GHz` channel utilization, and AP boot timestamp (`Last restart`).
-- **Recorder-friendly live roaming attributes:** Publishes `essid`, `access_point`, `band`, `channel`, `phy_type`, `signal`, `speed_mbps`, `os`, `role`, and `ipv6` while keeping `signal` and `speed_mbps` live in the UI and excluded from Recorder history (`_unrecorded_attributes`), plus opt-in per-client roaming sensors.
-- **Isolated `aruba_*` entity namespace:** Assigns deterministic `aruba_*` entity IDs (`device_tracker.aruba_*`, `sensor.aruba_*`, `binary_sensor.aruba_*`) to prevent entity ID collisions across your Home Assistant setup.
+- **Cluster, SSID & per-AP telemetry:** Exposes cluster-wide client counts, active Conductor / Master AP (both hub and per-AP `binary_sensor.aruba_<ap>_conductor`), per-SSID client counts, AP connectivity and hardware identity, per-AP client counts, `2.4 / 5 / 6 GHz` channel utilization and recorded radio channel history (`sensor.aruba_<ap>_*_channel`), AP boot timestamp (`Last restart`) with reboot cause, plus low-cadence firmware, backup partition, DRT, and native `UpdateEntity` diagnostics.
+- **Recorder-friendly live roaming attributes & safe cleanup:** Publishes `essid`, `access_point`, `band`, `channel`, `phy_type`, `signal`, `speed_mbps`, `os`, `role`, and `ipv6` while keeping `signal` and `speed_mbps` live in the UI and excluded from Recorder history (`_unrecorded_attributes`), plus opt-in per-client roaming sensors and `person.*`-safe stale client cleanup (`aruba_instant.purge_stale_clients`).
+- **Isolated `aruba_*` entity namespace & opt-in write controls:** Assigns deterministic `aruba_*` entity IDs (`device_tracker.aruba_*`, `sensor.aruba_*`, `binary_sensor.aruba_*`, `update.aruba_*`, plus opt-in `button.aruba_*` AP reboot, `switch.aruba_*` SSID toggle, and `aruba_instant.upgrade_firmware`) to prevent entity ID collisions across your Home Assistant setup.
 - **Read-only polling & redacted diagnostics:** Runs strictly read-only local polling without modifying your AP configuration, and includes one-click anonymized **Download diagnostics** with credentials, session tokens, MACs, IPs, AP names, and SSIDs automatically redacted.
 - **Full UI & multi-language support:** Guided setup (`ConfigFlow`), live tuning (`OptionsFlow`), targeted per-AP **Reauth**, and **Reconfigure** localized in **English**, **Deutsch**, and **Русский**.
 
@@ -55,7 +55,7 @@ Local Wi-Fi presence detection and real-time access point telemetry for HPE Arub
 
 Click the button below to open **Aruba Instant / AOS Wi-Fi** directly in your Home Assistant instance:
 
-[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=MixasikM&repository=ha-aruba-instant&category=integration)
+[![Open your Home Assistant instance and open a repository in the Marketplace.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=MixasikM&repository=ha-aruba-instant&category=integration)
 
 Or install it from the default catalog in the Home Assistant UI:
 1. Open **Settings -> Marketplace** (or **HACS -> Integrations**).
@@ -91,6 +91,7 @@ Or install it from the default catalog in the Home Assistant UI:
    - **Minimum SNR signal threshold** — default `0` (disabled; range `0–99`)
    - **Excluded MAC addresses** — comma-separated MAC list
    - **Create per-client roaming sensors (AP & SSID)** — default `false`
+   - **Enable AP & SSID write controls** — default `false` (keep off for strictly read-only polling; opt-in enables SSID toggle switches, AP reboot buttons, and firmware upgrade actions)
    - **Polling interval (seconds)** — default `15s` (range `5–300s`)
    - **Consider home duration (seconds)** — default `180s` (range `0–1800s`)
 
@@ -98,20 +99,33 @@ Or install it from the default catalog in the Home Assistant UI:
 
 ## Entities & Attributes
 
-All entities use a deterministic **`aruba_`** entity ID prefix (`device_tracker.aruba_*`, `sensor.aruba_*`, `binary_sensor.aruba_*`) so they never collide with other trackers or area-prefixed entities.
+All entities use a deterministic **`aruba_`** entity ID prefix (`device_tracker.aruba_*`, `sensor.aruba_*`, `binary_sensor.aruba_*`, `update.aruba_*`, `button.aruba_*`, `switch.aruba_*`) so they never collide with other trackers or area-prefixed entities.
 
 ### Cluster / Site Hub (`Aruba <Cluster / Site>`)
 - `sensor.aruba_<cluster>_total_clients` — Total active clients across the cluster/site
 - `sensor.aruba_<cluster>_master_ap` — Current Conductor / Master AP name *(Virtual Controller / Cluster mode only)*
+- `sensor.aruba_<cluster>_firmware` — Active primary firmware build with `backup_firmware`, `image_classes`, `model_version`, `last_reboot_cause`, `upgrade_in_progress`, and `drt_version` attributes *(Virtual Controller / Cluster mode only)*
+- `update.aruba_<cluster>_firmware` — Native HA update entity for cluster firmware (`on`, `off`, or `unknown` when offline / check unavailable) with live upgrade `in_progress` tracking *(Virtual Controller / Cluster mode only)*
 - `sensor.aruba_<cluster>_ssid_<ssid>_clients` — Active client count per discovered SSID
+- `switch.aruba_<cluster>_ssid_<ssid>_enabled` — Opt-in SSID broadcast toggle *(created only when **Enable AP & SSID write controls** is enabled)*
 
 ### Access Point Devices (`Aruba <AP>`)
-- `binary_sensor.aruba_<ap>_online` — Reachability / online status in the cluster or Multi-AP pool
+- `binary_sensor.aruba_<ap>_online` — Reachability / online status in the cluster or Multi-AP pool (`ip_address`, `mac_address`, `serial_number`, `model`, `ap_class`, `is_conductor` attributes)
+- `binary_sensor.aruba_<ap>_conductor` — Diagnostic indicator showing whether this AP currently holds the Conductor / Master role
 - `sensor.aruba_<ap>_clients` — Connected clients on this AP
 - `sensor.aruba_<ap>_5ghz_utilization` — 5 GHz channel utilization (`%`)
 - `sensor.aruba_<ap>_2_4ghz_utilization` — 2.4 GHz channel utilization (`%`)
 - `sensor.aruba_<ap>_6ghz_utilization` — 6 GHz channel utilization (`%`, created when a 6 GHz radio is reported)
-- `sensor.aruba_<ap>_uptime` — AP last boot timestamp (`timestamp`, diagnostic; suppresses up to `120s` drift to prevent Recorder bloat)
+- `sensor.aruba_<ap>_5ghz_channel` — Active 5 GHz radio channel *(diagnostic, recorded for channel history)*
+- `sensor.aruba_<ap>_2_4ghz_channel` — Active 2.4 GHz radio channel *(diagnostic, recorded for channel history)*
+- `sensor.aruba_<ap>_6ghz_channel` — Active 6 GHz radio channel *(diagnostic, recorded when a 6 GHz radio is reported)*
+- `sensor.aruba_<ap>_firmware` — Active AP firmware build (`backup_firmware`, `ap_class`, `upgrade_status`, `upgrade_error`, `serial_number`, `mac_address` attributes)
+- `sensor.aruba_<ap>_uptime` — AP last boot timestamp (`timestamp`, diagnostic; suppresses up to `120s` drift, includes `last_reboot_cause` attribute)
+- `button.aruba_<ap>_reboot` — Opt-in AP restart button *(created only when **Enable AP & SSID write controls** is enabled)*
+
+### Services / Actions
+- `aruba_instant.purge_stale_clients` — Inspect (`dry_run: true` default) or clean up stale `device_tracker.aruba_*` entries older than `stale_days` (optionally filtered by `ssid`). Uses persistent `last_seen` storage and protects trackers bound to `person.*` entities (`skip_person_bound: true` default).
+- `aruba_instant.upgrade_firmware` — Trigger an InstantOS upgrade from a self-hosted HTTP/HTTPS firmware URL *(requires **Enable AP & SSID write controls** enabled)*.
 
 ### Client Devices (`device_tracker.aruba_<client>`)
 - **State:** `home` / `not_home` (away devices are restored from the Entity Registry at startup as `not_home` rather than `unavailable`; up to 2 consecutive transient poll failures preserve the last snapshot before marking `unavailable`)
@@ -133,6 +147,13 @@ All entities use a deterministic **`aruba_`** entity ID prefix (`device_tracker.
 - **Phones flapping `not_home` during brief Wi-Fi sleep:** Increase **Consider home duration (seconds)** in **Configure** (e.g., `240`–`300` seconds; default is `180`). Conversely, decrease to `60` or `0` if Aruba's AP aging already provides enough buffer.
 - **Older InstantOS 6.x / early 8.x SSH handshake errors:** Enable **Legacy SSH algorithm fallback** in **Advanced network settings** (`Auto` / `SSH` also retries SHA-1 KEX negotiation automatically).
 - **Changed password on one AP in a Multi-AP pool:** Use the integration's **Reauth** flow to update credentials only for the failing AP (or apply across all nodes) without removing entities or breaking `person.*` links.
+
+---
+
+## Removal / Uninstall
+
+1. Go to **Settings -> Devices & Services -> Aruba Instant / AOS Wi-Fi** and delete the integration entry (entries). Home Assistant removes all associated devices, entities, and stored config entry data automatically.
+2. Open **Settings -> Marketplace** (or **HACS -> Integrations**), select **Aruba Instant / AOS Wi-Fi**, click the menu -> **Remove**, and restart Home Assistant if prompted (for manual installs, delete `/config/custom_components/aruba_instant` and restart).
 
 ---
 

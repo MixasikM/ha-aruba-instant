@@ -124,6 +124,7 @@
           "min_signal": "Минимальный порог сигнала SNR",
           "exclude_macs": "Исключённые MAC-адреса",
           "enable_roaming_sensors": "Создавать сенсоры роуминга клиентов (AP и SSID)",
+          "enable_write_controls": "Включить управление AP и SSID",
           "scan_interval": "Интервал опроса (сек.)",
           "consider_home": "Время удержания статуса «Дома» (сек.)"
         },
@@ -137,6 +138,7 @@
           "min_signal": "Игнорировать слабые соседские подключения ниже этого уровня SNR (0 отключает фильтр).",
           "exclude_macs": "Список MAC-адресов через запятую для полного исключения.",
           "enable_roaming_sensors": "Добавляет диагностические сенсоры текущей точки доступа и SSID для каждого клиента (по умолчанию выкл.).",
+          "enable_write_controls": "Опциональные переключатели SSID, кнопки перезагрузки точек и обновления прошивки. Оставьте выключенным для режима «только чтение» (не работает на read-only AOS 10 / Central).",
           "scan_interval": "Частота опроса точек и клиентов Aruba (5–300 с).",
           "consider_home": "Задержка перед переводом спящего смартфона в статус «Нет дома» (защита от ложных переключений в режиме энергосбережения Wi-Fi)."
         }
@@ -300,6 +302,7 @@
           "min_signal": "Минимальный порог сигнала SNR",
           "exclude_macs": "Исключённые MAC-адреса",
           "enable_roaming_sensors": "Создавать сенсоры роуминга клиентов (AP и SSID)",
+          "enable_write_controls": "Включить управление AP и SSID",
           "scan_interval": "Интервал опроса (сек.)",
           "consider_home": "Время удержания статуса «Дома» (сек.)"
         },
@@ -313,6 +316,7 @@
           "min_signal": "Игнорировать слабые соседские подключения ниже этого уровня SNR (0 отключает фильтр).",
           "exclude_macs": "Список MAC-адресов через запятую для полного исключения.",
           "enable_roaming_sensors": "Добавляет диагностические сенсоры текущей точки доступа и SSID для каждого клиента.",
+          "enable_write_controls": "Опциональные переключатели SSID, кнопки перезагрузки точек и обновления прошивки. Оставьте выключенным для режима «только чтение» (не работает на read-only AOS 10 / Central).",
           "scan_interval": "Частота опроса точек и клиентов Aruba (5–300 с).",
           "consider_home": "Задержка перед переводом спящего смартфона в статус «Нет дома» (защита от ложных переключений в режиме энергосбережения Wi-Fi)."
         }
@@ -348,6 +352,35 @@
       "master_ap": {
         "name": "Ведущая точка доступа"
       },
+      "cluster_firmware": {
+        "name": "Прошивка кластера",
+        "state_attributes": {
+          "backup_firmware": {
+            "name": "Прошивка резервного раздела"
+          },
+          "primary_build_time": {
+            "name": "Время сборки (Primary)"
+          },
+          "backup_build_time": {
+            "name": "Время сборки (Backup)"
+          },
+          "image_classes": {
+            "name": "Классы образов AP"
+          },
+          "model_version": {
+            "name": "Строка версии ArubaOS"
+          },
+          "last_reboot_cause": {
+            "name": "Причина последнего перезапуска"
+          },
+          "upgrade_in_progress": {
+            "name": "Идёт обновление"
+          },
+          "drt_version": {
+            "name": "Доступная версия DRT"
+          }
+        }
+      },
       "ssid_clients": {
         "name": "Клиенты SSID {ssid}"
       },
@@ -363,8 +396,45 @@
       "utilization_6ghz": {
         "name": "Загрузка канала 6 ГГц"
       },
+      "channel_5ghz": {
+        "name": "Канал 5 ГГц"
+      },
+      "channel_2_4ghz": {
+        "name": "Канал 2,4 ГГц"
+      },
+      "channel_6ghz": {
+        "name": "Канал 6 ГГц"
+      },
+      "ap_firmware": {
+        "name": "Прошивка",
+        "state_attributes": {
+          "backup_firmware": {
+            "name": "Прошивка резервного раздела"
+          },
+          "ap_class": {
+            "name": "Класс образа AP"
+          },
+          "upgrade_status": {
+            "name": "Статус обновления"
+          },
+          "upgrade_error": {
+            "name": "Ошибка обновления"
+          },
+          "serial_number": {
+            "name": "Серийный номер"
+          },
+          "mac_address": {
+            "name": "MAC-адрес"
+          }
+        }
+      },
       "uptime": {
-        "name": "Последний запуск"
+        "name": "Последний запуск",
+        "state_attributes": {
+          "last_reboot_cause": {
+            "name": "Причина последнего перезапуска"
+          }
+        }
       },
       "client_access_point": {
         "name": "Точка доступа Aruba"
@@ -375,7 +445,73 @@
     },
     "binary_sensor": {
       "ap_online": {
-        "name": "В сети"
+        "name": "В сети",
+        "state_attributes": {
+          "ip_address": {
+            "name": "IP-адрес"
+          },
+          "mac_address": {
+            "name": "MAC-адрес"
+          },
+          "serial_number": {
+            "name": "Серийный номер"
+          },
+          "model": {
+            "name": "Модель"
+          },
+          "ap_class": {
+            "name": "Класс образа AP"
+          },
+          "is_conductor": {
+            "name": "Активный контроллер"
+          }
+        }
+      },
+      "ap_conductor": {
+        "name": "Активный контроллер"
+      }
+    },
+    "update": {
+      "cluster_firmware_update": {
+        "name": "Прошивка кластера",
+        "state_attributes": {
+          "backup_firmware": {
+            "name": "Прошивка резервного раздела"
+          },
+          "image_classes": {
+            "name": "Классы образов AP"
+          },
+          "image_server_state": {
+            "name": "Статус сервера образов"
+          },
+          "image_server_message": {
+            "name": "Сообщение сервера образов"
+          },
+          "drt_version": {
+            "name": "Доступная версия DRT"
+          }
+        }
+      }
+    },
+    "button": {
+      "ap_reboot": {
+        "name": "Перезагрузить точку доступа"
+      }
+    },
+    "switch": {
+      "ssid_enabled": {
+        "name": "SSID {ssid}",
+        "state_attributes": {
+          "profile_name": {
+            "name": "Имя профиля"
+          },
+          "essid": {
+            "name": "ESSID"
+          },
+          "network_type": {
+            "name": "Тип сети"
+          }
+        }
       }
     },
     "device_tracker": {
@@ -416,9 +552,74 @@
       }
     }
   },
+  "services": {
+    "purge_stale_clients": {
+      "name": "Очистить устаревших клиентов",
+      "description": "Находит и при необходимости удаляет устаревшие трекеры Aruba, не появлявшиеся дольше заданного срока (трекеры, привязанные к персонам HA, защищены по умолчанию).",
+      "fields": {
+        "config_entry_id": {
+          "name": "Запись интеграции",
+          "description": "Необязательный хаб Aruba Instant; если не указано, проверяются все загруженные записи."
+        },
+        "stale_days": {
+          "name": "Порог неактивности (дней)",
+          "description": "Минимальное число дней с последнего появления клиента для отбора к очистке."
+        },
+        "ssid": {
+          "name": "Фильтр по SSID",
+          "description": "Необязательный фильтр по ESSID (например, очищать только клиентов гостевого Wi-Fi)."
+        },
+        "skip_person_bound": {
+          "name": "Защищать трекеры персон",
+          "description": "Никогда не удалять device_tracker, привязанные к сущностям person.*."
+        },
+        "dry_run": {
+          "name": "Пробный запуск (только список)",
+          "description": "Вернуть подходящие сущности без фактического удаления из Home Assistant."
+        }
+      }
+    },
+    "upgrade_firmware": {
+      "name": "Обновить прошивку кластера",
+      "description": "Запускает обновление прошивки InstantOS по локальной ссылке HTTP/HTTPS (требуется включённое управление AP и SSID в настройках).",
+      "fields": {
+        "config_entry_id": {
+          "name": "Запись интеграции",
+          "description": "Хаб Aruba Instant для обновления (обязательно, если настроено несколько хабов)."
+        },
+        "image_url": {
+          "name": "URL образа прошивки",
+          "description": "HTTP- или HTTPS-ссылка на файл прошивки для точек доступа Aruba."
+        },
+        "ap_class": {
+          "name": "Класс образа AP",
+          "description": "Необязательный класс железа (например, Hercules или Centaurus), если в кластере несколько моделей."
+        },
+        "auto_reboot": {
+          "name": "Автоперезагрузка после прошивки",
+          "description": "Автоматически перезагрузить точки доступа после записи образа."
+        }
+      }
+    }
+  },
   "exceptions": {
     "ap_auth_failed": {
       "message": "Ошибка аутентификации на точке (точках) доступа Aruba: {host}"
+    },
+    "write_controls_disabled": {
+      "message": "Сначала включите опцию «Включить управление AP и SSID» в настройках Aruba Instant."
+    },
+    "action_failed": {
+      "message": "Сбой действия Aruba Instant: {error}"
+    },
+    "ambiguous_ap_class": {
+      "message": "Не удалось автоматически определить единственный класс образа AP; укажите ap_class явно."
+    },
+    "entry_not_loaded": {
+      "message": "Выбранная запись интеграции Aruba Instant не загружена."
+    },
+    "config_entry_required": {
+      "message": "Настроено несколько хабов Aruba Instant; укажите config_entry_id."
     }
   }
 }

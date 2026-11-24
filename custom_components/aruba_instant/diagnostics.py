@@ -57,6 +57,11 @@ TO_REDACT = {
     "access_point",
     "ap_name",
     "master_ap_name",
+    "new_image_url",
+    "new_drt_url",
+    "image_url",
+    "image_info",
+    "firmware_url",
 }
 
 

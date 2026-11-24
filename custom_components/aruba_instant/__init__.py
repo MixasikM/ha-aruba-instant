@@ -6,8 +6,9 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers import config_validation as cv, device_registry as dr, entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.typing import ConfigType
 
 from .adapters.multi_ap_client import MultiApClusterClient, build_node_client
 from .const import (
@@ -27,6 +28,15 @@ from .coordinator import (
 )
 from .engine.models import normalize_mac
 from .ports.cluster_client import BaseArubaClusterClient
+from .services import async_register_services
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Register domain services once for Aruba Instant / AOS Wi-Fi."""
+    await async_register_services(hass)
+    return True
 
 
 def build_cluster_client(
@@ -99,6 +109,7 @@ async def async_setup_entry(
         site_name=site_name,
         topology_mode=topology_mode,
     )
+    await coordinator.async_load_client_store()
 
     entry.async_on_unload(client.async_close)
 
@@ -106,7 +117,12 @@ async def async_setup_entry(
 
     dev_reg = dr.async_get(hass)
     sw_version = (
-        coordinator.data.summary.version if coordinator.data is not None else None
+        (
+            coordinator.data.firmware_info.primary_version
+            if coordinator.data is not None and coordinator.data.firmware_info
+            else None
+        )
+        or (coordinator.data.summary.version if coordinator.data is not None else None)
     )
     hub_device = dev_reg.async_get_or_create(
         config_entry_id=entry.entry_id,
@@ -139,7 +155,10 @@ async def async_unload_entry(
     hass: HomeAssistant,
     entry: ArubaInstantConfigEntry,
 ) -> bool:
-    """Unload a config entry and release transport sessions."""
+    """Unload a config entry, flush client store, and release transport sessions."""
+    runtime_data = getattr(entry, "runtime_data", None)
+    if runtime_data is not None and runtime_data.coordinator is not None:
+        await runtime_data.coordinator.async_flush_client_store()
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 

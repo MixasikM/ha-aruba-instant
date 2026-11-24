@@ -19,25 +19,37 @@ from custom_components.aruba_instant.engine.models import (
     normalize_mac,
 )
 from custom_components.aruba_instant.engine.parsers import (
+    build_firmware_info,
     build_snapshot,
     classify_band,
+    enrich_snapshot_with_firmware,
     parse_aps,
     parse_clients,
+    parse_image_check_xml,
+    parse_image_version,
     parse_networks,
     parse_summary,
+    parse_upgrade_info,
     parse_uptime_seconds,
+    parse_version_details,
 )
 from tests.fixtures.aruba_8_10_samples import (
+    IMAGE_CHECK_ERROR_XML,
+    IMAGE_CHECK_SUCCESS_EMPTY_XML,
+    IMAGE_CHECK_UPDATE_XML,
     MULTI_AP_NODE1_CLIENTS,
     MULTI_AP_NODE2_CLIENTS,
     SHOW_APS_OUTPUT,
     SHOW_APS_SINGLE_SSH_RAW,
     SHOW_CLIENTS_OUTPUT,
     SHOW_CLIENTS_SSH_RAW,
+    SHOW_IMAGE_VERSION_OUTPUT,
     SHOW_NETWORK_OUTPUT,
     SHOW_SUMMARY_8_6_OUTPUT,
     SHOW_SUMMARY_OUTPUT,
     SHOW_SUMMARY_STANDALONE_AOS10,
+    SHOW_UPGRADE_INFO_OUTPUT,
+    SHOW_VERSION_OUTPUT,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -281,3 +293,64 @@ AP-192.0.2.99  198.51.100.5* access  disable   4        515(indoor)  --         
     assert aps[0].is_conductor is True
     assert aps[0].serial == "SN99999999"
     assert aps[0].radio_5ghz_utilization == 11
+
+
+def test_firmware_parsers_xml_and_enrichment() -> None:
+    img = parse_image_version(SHOW_IMAGE_VERSION_OUTPUT)
+    assert img.primary_version == "8.10.0.24_97188 LSR (Digitally Signed - Production Build)"
+    assert img.backup_version == "8.10.0.21_94501 LSR (Digitally Signed - Production Build)"
+    assert img.image_classes == ("Hercules",)
+
+    model_line, reboot_cause = parse_version_details(SHOW_VERSION_OUTPUT)
+    assert model_line == "ArubaOS (MODEL: 325), Version 8.10.0.24 LSR"
+    assert reboot_cause and "Image Upgrade Successful" in reboot_cause
+
+    in_prog, auto_reboot, statuses = parse_upgrade_info(SHOW_UPGRADE_INFO_OUTPUT)
+    assert in_prog is False
+    assert auto_reboot is True
+    assert len(statuses) == 3
+    assert statuses[0].mac == "02:00:00:10:00:01"
+    assert statuses[0].image_info == "From Seed"
+    assert statuses[1].ap_class == "Hercules"
+
+    fw_info = build_firmware_info(SHOW_IMAGE_VERSION_OUTPUT, SHOW_VERSION_OUTPUT, SHOW_UPGRADE_INFO_OUTPUT)
+    err_chk = parse_image_check_xml(IMAGE_CHECK_ERROR_XML)
+    assert err_chk.server_state == "error"
+    assert err_chk.server_message == "Internal error 001 code 2"
+    assert err_chk.new_image_version is None
+
+    # DOCTYPE/ENTITY XML hardening + Disabled network without Active column
+    assert parse_image_check_xml('<?xml version="1.0"?><!DOCTYPE x><re/>').server_state is None
+    disabled_net = """
+Networks
+--------
+Profile Name      ESSID             Clients  Type      Band         Status
+------------      -----             -------  ----      ----         ------
+DisabledNet       DisabledNet       0        guest     2.4ghz,5ghz  Disabled
+"""
+    dnets = parse_networks(disabled_net)
+    assert len(dnets) == 1
+    assert dnets[0].active is False
+    assert err_chk.new_drt_version == "1.0_97611"
+
+    ok_empty_chk = parse_image_check_xml(IMAGE_CHECK_SUCCESS_EMPTY_XML)
+    assert ok_empty_chk.server_state == "success"
+    assert ok_empty_chk.new_image_version is None
+
+    upd_chk = parse_image_check_xml(IMAGE_CHECK_UPDATE_XML)
+    assert upd_chk.server_state == "success"
+    assert upd_chk.new_image_version == "8.10.0.25_98000"
+    assert upd_chk.new_image_url == "http://192.0.2.50/ArubaInstant_Hercules_8.10.0.25_98000"
+
+    assert parse_image_check_xml("<broken>").server_state is None
+
+    snap = build_snapshot(SHOW_SUMMARY_OUTPUT, SHOW_NETWORK_OUTPUT, SHOW_APS_OUTPUT, SHOW_CLIENTS_OUTPUT)
+    enriched = enrich_snapshot_with_firmware(snap, fw_info, upd_chk)
+    by_name = {ap.name: ap for ap in enriched.access_points}
+    assert by_name["AP-Lobby"].mac == "02:00:00:10:00:01"
+    assert by_name["AP-Lobby"].ap_class == "Hercules"
+    assert by_name["AP-Lobby"].upgrade_status == "image-ok"
+    assert by_name["AP-Lobby"].upgrade_error is None
+    assert by_name["AP-Lobby"].last_reboot_cause == fw_info.last_reboot_cause
+    assert by_name["AP-Lab Desk"].mac == "02:00:00:10:00:02"
+    assert by_name["AP-Lab Desk"].backup_firmware == img.backup_version

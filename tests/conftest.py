@@ -79,6 +79,9 @@ def _install_ha_stubs() -> None:
         DEVICE_TRACKER = "device_tracker"
         SENSOR = "sensor"
         BINARY_SENSOR = "binary_sensor"
+        UPDATE = "update"
+        BUTTON = "button"
+        SWITCH = "switch"
 
     class EntityCategory(str, Enum):
         CONFIG = "config"
@@ -94,13 +97,76 @@ def _install_ha_stubs() -> None:
     # homeassistant.core
     core_mod = types.ModuleType("homeassistant.core")
 
+    class SupportsResponse(str, Enum):
+        NONE = "none"
+        OPTIONAL = "optional"
+        ONLY = "only"
+
+    @dataclass
+    class ServiceCall:
+        domain: str
+        service: str
+        data: dict[str, Any] = field(default_factory=dict)
+
+    class _FakeServices:
+        def __init__(self) -> None:
+            self._handlers: dict[tuple[str, str], tuple[Callable[..., Any], Any, SupportsResponse]] = {}
+
+        def has_service(self, domain: str, service: str) -> bool:
+            return (domain, service) in self._handlers
+
+        def async_register(
+            self,
+            domain: str,
+            service: str,
+            handler: Callable[..., Any],
+            schema: Any = None,
+            supports_response: SupportsResponse = SupportsResponse.NONE,
+        ) -> None:
+            self._handlers[(domain, service)] = (handler, schema, supports_response)
+
+        async def async_call(
+            self,
+            domain: str,
+            service: str,
+            service_data: dict[str, Any] | None = None,
+            blocking: bool = True,
+            return_response: bool = False,
+        ) -> Any:
+            handler, schema, _ = self._handlers[(domain, service)]
+            payload = dict(service_data or {})
+            if schema is not None:
+                payload = schema(payload)
+            return await handler(ServiceCall(domain=domain, service=service, data=payload))
+
+    class _FakeStates:
+        def __init__(self) -> None:
+            self._states: dict[str, Any] = {}
+
+        def async_set(self, entity_id: str, state: str, attributes: dict[str, Any] | None = None) -> None:
+            self._states[entity_id] = types.SimpleNamespace(
+                entity_id=entity_id,
+                domain=entity_id.split(".", 1)[0],
+                state=state,
+                attributes=dict(attributes or {}),
+            )
+
+        def async_all(self, domain_filter: str | None = None) -> list[Any]:
+            if domain_filter is None:
+                return list(self._states.values())
+            return [s for s in self._states.values() if s.domain == domain_filter]
+
     class HomeAssistant:
         def __init__(self) -> None:
             self.data: dict[str, Any] = {}
             self._test_session: Any = None
+            self.services = _FakeServices()
+            self.states = _FakeStates()
             self.config_entries = types.SimpleNamespace(
                 _entries=[],
-                async_entries=lambda domain=None: [],
+                async_entries=lambda domain=None: (
+                    [e for e in self.config_entries._entries if domain is None or e.domain == domain]
+                ),
                 async_forward_entry_setups=self._async_noop,
                 async_unload_platforms=self._async_true,
                 async_update_entry=self._async_update_entry,
@@ -124,14 +190,14 @@ def _install_ha_stubs() -> None:
 
     core_mod.HomeAssistant = HomeAssistant  # type: ignore[attr-defined]
     core_mod.callback = callback  # type: ignore[attr-defined]
+    core_mod.ServiceCall = ServiceCall  # type: ignore[attr-defined]
+    core_mod.ServiceResponse = dict[str, Any] | None  # type: ignore[attr-defined]
+    core_mod.SupportsResponse = SupportsResponse  # type: ignore[attr-defined]
 
     # homeassistant.exceptions
     exc_mod = types.ModuleType("homeassistant.exceptions")
 
     class HomeAssistantError(Exception):
-        pass
-
-    class ConfigEntryAuthFailed(HomeAssistantError):
         def __init__(
             self,
             *args: Any,
@@ -144,7 +210,14 @@ def _install_ha_stubs() -> None:
             self.translation_key = translation_key
             self.translation_placeholders = translation_placeholders
 
+    class ServiceValidationError(HomeAssistantError):
+        pass
+
+    class ConfigEntryAuthFailed(HomeAssistantError):
+        pass
+
     exc_mod.HomeAssistantError = HomeAssistantError  # type: ignore[attr-defined]
+    exc_mod.ServiceValidationError = ServiceValidationError  # type: ignore[attr-defined]
     exc_mod.ConfigEntryAuthFailed = ConfigEntryAuthFailed  # type: ignore[attr-defined]
 
     # homeassistant.util & dt & slugify
@@ -358,6 +431,7 @@ def _install_ha_stubs() -> None:
         via_device_id: str | None = None
         manufacturer: str | None = None
         model: str | None = None
+        hw_version: str | None = None
         serial_number: str | None = None
         sw_version: str | None = None
         name: str | None = None
@@ -367,9 +441,13 @@ def _install_ha_stubs() -> None:
         id: str
         identifiers: set[tuple[str, str]] = field(default_factory=set)
         connections: set[tuple[str, str]] = field(default_factory=set)
+        config_entries: set[str] = field(default_factory=set)
         name: str | None = None
         name_by_user: str | None = None
         via_device_id: str | None = None
+        sw_version: str | None = None
+        hw_version: str | None = None
+        serial_number: str | None = None
 
     class FakeDeviceRegistry:
         def __init__(self) -> None:
@@ -381,22 +459,54 @@ def _install_ha_stubs() -> None:
         def async_get_or_create(self, **kwargs: Any) -> DeviceEntry:
             idents = set(kwargs.get("identifiers") or set())
             conns = set(kwargs.get("connections") or set())
+            cfg_id = kwargs.get("config_entry_id")
             for dev in self.devices.values():
                 if (idents and (dev.identifiers & idents)) or (conns and (dev.connections & conns)):
-                    # Mirror real HA DeviceRegistry behavior updating name when supplied
+                    # Mirror real HA DeviceRegistry behavior updating metadata when supplied
+                    if cfg_id:
+                        dev.config_entries.add(cfg_id)
                     if kwargs.get("name"):
                         dev.name = kwargs["name"]
+                    for field_name in ("sw_version", "hw_version", "serial_number"):
+                        if kwargs.get(field_name) is not None:
+                            setattr(dev, field_name, kwargs[field_name])
                     return dev
             dev_id = f"dev_{len(self.devices) + 1}"
             dev = DeviceEntry(
                 id=dev_id,
                 identifiers=idents,
                 connections=conns,
+                config_entries={cfg_id} if cfg_id else set(),
                 name=kwargs.get("name"),
                 via_device_id=kwargs.get("via_device_id"),
+                sw_version=kwargs.get("sw_version"),
+                hw_version=kwargs.get("hw_version"),
+                serial_number=kwargs.get("serial_number"),
             )
             self.devices[dev_id] = dev
             return dev
+
+        def async_update_device(self, device_id: str, **kwargs: Any) -> DeviceEntry | None:
+            dev = self.devices.get(device_id)
+            if dev is None:
+                return None
+            if (rem := kwargs.get("remove_config_entry_id")) is not None:
+                dev.config_entries.discard(rem)
+                if not dev.config_entries:
+                    self.devices.pop(device_id, None)
+                    return None
+            for field_name in ("sw_version", "hw_version", "serial_number", "name"):
+                if field_name in kwargs:
+                    setattr(dev, field_name, kwargs[field_name])
+            return dev
+
+        def async_get_device_by_identifier(
+            self, identifier: tuple[str, str], config_entry_id: str
+        ) -> DeviceEntry | None:
+            for dev in self.devices.values():
+                if identifier in dev.identifiers and config_entry_id in dev.config_entries:
+                    return dev
+            return None
 
         def async_get_device(self, *, identifiers: set[tuple[str, str]]) -> DeviceEntry | None:
             for dev in self.devices.values():
@@ -435,6 +545,16 @@ def _install_ha_stubs() -> None:
 
         def get_entries_for_config_entry_id(self, entry_id: str) -> list[RegistryEntry]:
             return [e for e in self.items.values() if e.config_entry_id == entry_id]
+
+        def get_entries_for_device_id(
+            self, device_id: str, include_disabled_entities: bool = False
+        ) -> list[RegistryEntry]:
+            return [
+                e
+                for e in self.items.values()
+                if e.device_id == device_id
+                and (include_disabled_entities or e.disabled_by is None)
+            ]
 
     class FakeEntityRegistry:
         def __init__(self) -> None:
@@ -482,10 +602,20 @@ def _install_ha_stubs() -> None:
             ):
                 ent_reg.async_update_entity(entry.entity_id, **updates)
 
+    def async_entries_for_device(
+        registry: FakeEntityRegistry,
+        device_id: str,
+        include_disabled_entities: bool = False,
+    ) -> list[RegistryEntry]:
+        return registry.entities.get_entries_for_device_id(
+            device_id, include_disabled_entities
+        )
+
     er_mod.RegistryEntryDisabler = RegistryEntryDisabler  # type: ignore[attr-defined]
     er_mod.RegistryEntry = RegistryEntry  # type: ignore[attr-defined]
     er_mod.async_get = lambda hass: hass.data.setdefault("_er", FakeEntityRegistry())  # type: ignore[attr-defined]
     er_mod.async_migrate_entries = async_migrate_entries  # type: ignore[attr-defined]
+    er_mod.async_entries_for_device = async_entries_for_device  # type: ignore[attr-defined]
 
     ep_mod = types.ModuleType("homeassistant.helpers.entity_platform")
     ep_mod.AddConfigEntryEntitiesCallback = Callable[[list[Any]], None]  # type: ignore[attr-defined]
@@ -557,6 +687,9 @@ def _install_ha_stubs() -> None:
                 self.last_update_success = False
             for cb in list(self._listeners):
                 cb()
+
+        async def async_request_refresh(self) -> None:
+            await self.async_refresh()
 
         async def _async_update_data(self) -> Any:
             raise NotImplementedError
@@ -657,6 +790,86 @@ def _install_ha_stubs() -> None:
     bs_comp.BinarySensorDeviceClass = BinarySensorDeviceClass  # type: ignore[attr-defined]
     bs_comp.BinarySensorEntity = BinarySensorEntity  # type: ignore[attr-defined]
 
+    update_comp = types.ModuleType("homeassistant.components.update")
+
+    class UpdateDeviceClass(str, Enum):
+        FIRMWARE = "firmware"
+
+    from enum import IntFlag
+
+    class UpdateEntityFeature(IntFlag):
+        INSTALL = 1
+        SPECIFIC_VERSION = 2
+        PROGRESS = 4
+        BACKUP = 8
+        RELEASE_NOTES = 16
+
+    class UpdateEntity(_BaseEntity):
+        @property
+        def state(self) -> str:
+            installed = getattr(self, "installed_version", None)
+            latest = getattr(self, "latest_version", None)
+            if installed is None or latest is None:
+                return "unknown"
+            ver_newer = getattr(self, "version_is_newer", None)
+            if callable(ver_newer):
+                return "on" if ver_newer(latest, installed) else "off"
+            return "on" if latest != installed else "off"
+
+    update_comp.DOMAIN = "update"  # type: ignore[attr-defined]
+    update_comp.UpdateDeviceClass = UpdateDeviceClass  # type: ignore[attr-defined]
+    update_comp.UpdateEntityFeature = UpdateEntityFeature  # type: ignore[attr-defined]
+    update_comp.UpdateEntity = UpdateEntity  # type: ignore[attr-defined]
+
+    button_comp = types.ModuleType("homeassistant.components.button")
+
+    class ButtonDeviceClass(str, Enum):
+        IDENTIFY = "identify"
+        RESTART = "restart"
+        UPDATE = "update"
+
+    class ButtonEntity(_BaseEntity):
+        pass
+
+    button_comp.DOMAIN = "button"  # type: ignore[attr-defined]
+    button_comp.ButtonDeviceClass = ButtonDeviceClass  # type: ignore[attr-defined]
+    button_comp.ButtonEntity = ButtonEntity  # type: ignore[attr-defined]
+
+    switch_comp = types.ModuleType("homeassistant.components.switch")
+
+    class SwitchEntity(_BaseEntity):
+        pass
+
+    switch_comp.DOMAIN = "switch"  # type: ignore[attr-defined]
+    switch_comp.SwitchEntity = SwitchEntity  # type: ignore[attr-defined]
+
+    cv_mod = types.ModuleType("homeassistant.helpers.config_validation")
+    cv_mod.config_entry_only_config_schema = lambda domain: (lambda cfg: cfg)  # type: ignore[attr-defined]
+
+    typing_mod = types.ModuleType("homeassistant.helpers.typing")
+    typing_mod.ConfigType = dict[str, Any]  # type: ignore[attr-defined]
+
+    storage_mod = types.ModuleType("homeassistant.helpers.storage")
+
+    class Store:
+        __class_getitem__ = classmethod(lambda cls, item: cls)
+
+        def __init__(self, hass: HomeAssistant, version: int, key: str) -> None:
+            self.hass = hass
+            self.version = version
+            self.key = key
+
+        async def async_load(self) -> Any:
+            return self.hass.data.setdefault("_stores", {}).get(self.key)
+
+        async def async_save(self, data: Any) -> None:
+            self.hass.data.setdefault("_stores", {})[self.key] = data
+
+        def async_delay_save(self, data_func: Callable[[], Any], delay: float = 0) -> None:
+            self.hass.data.setdefault("_stores", {})[self.key] = data_func()
+
+    storage_mod.Store = Store  # type: ignore[attr-defined]
+
     diag_comp = types.ModuleType("homeassistant.components.diagnostics")
     REDACTED = "**REDACTED**"
 
@@ -690,15 +903,21 @@ def _install_ha_stubs() -> None:
             "homeassistant.config_entries": ce_mod,
             "homeassistant.helpers": helpers_mod,
             "homeassistant.helpers.aiohttp_client": aio_mod,
+            "homeassistant.helpers.config_validation": cv_mod,
             "homeassistant.helpers.device_registry": dr_mod,
             "homeassistant.helpers.entity_registry": er_mod,
             "homeassistant.helpers.entity_platform": ep_mod,
             "homeassistant.helpers.selector": sel_mod,
+            "homeassistant.helpers.storage": storage_mod,
+            "homeassistant.helpers.typing": typing_mod,
             "homeassistant.helpers.update_coordinator": uc_mod,
             "homeassistant.components": comps_mod,
             "homeassistant.components.device_tracker": dt_comp,
             "homeassistant.components.sensor": sensor_comp,
             "homeassistant.components.binary_sensor": bs_comp,
+            "homeassistant.components.update": update_comp,
+            "homeassistant.components.button": button_comp,
+            "homeassistant.components.switch": switch_comp,
             "homeassistant.components.diagnostics": diag_comp,
         }
     )

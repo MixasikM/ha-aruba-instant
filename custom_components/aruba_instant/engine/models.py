@@ -46,6 +46,49 @@ class WirelessNetwork:
 
 
 @dataclass(frozen=True)
+class ApUpgradeEntry:
+    """Per-AP entry parsed from `show upgrade info`."""
+
+    mac: str
+    ip_address: str
+    ap_class: str = ""
+    status: str = ""
+    image_info: str = ""
+    error_detail: str = ""
+    reboot_cause: str | None = None
+    primary_version: str | None = None
+    backup_version: str | None = None
+
+
+@dataclass(frozen=True)
+class FirmwareImageInfo:
+    """Cluster or standalone AP firmware, partition, and upgrade metadata."""
+
+    primary_version: str | None = None
+    primary_build_time: str | None = None
+    backup_version: str | None = None
+    backup_build_time: str | None = None
+    image_classes: tuple[str, ...] = ()
+    model_version_line: str | None = None
+    last_reboot_cause: str | None = None
+    upgrade_in_progress: bool = False
+    auto_reboot: bool | None = None
+    ap_statuses: tuple[ApUpgradeEntry, ...] = ()
+
+
+@dataclass(frozen=True)
+class FirmwareCheckResult:
+    """Result parsed from InstantOS `swarm.cgi?opcode=image-check-status` XML."""
+
+    server_state: str | None = None
+    server_message: str | None = None
+    new_image_version: str | None = None
+    new_image_url: str | None = None
+    new_drt_version: str | None = None
+    new_drt_url: str | None = None
+
+
+@dataclass(frozen=True)
 class AccessPoint:
     """Physical Aruba Access Point telemetry parsed from `show aps`."""
 
@@ -64,6 +107,13 @@ class AccessPoint:
     radio_6ghz_channel: str | None = None
     radio_6ghz_utilization: int | None = None
     sw_version: str | None = None
+    mac: str | None = None
+    ap_class: str | None = None
+    primary_firmware: str | None = None
+    backup_firmware: str | None = None
+    upgrade_status: str | None = None
+    upgrade_error: str | None = None
+    last_reboot_cause: str | None = None
 
     @property
     def stable_id(self) -> str:
@@ -103,6 +153,8 @@ class ClusterSnapshot:
     clients: list[WirelessClient] = field(default_factory=list)
     fetched_at: datetime | None = None
     master_ap_name: str | None = None
+    firmware_info: FirmwareImageInfo | None = None
+    firmware_check: FirmwareCheckResult | None = None
 
     @property
     def all_ssids(self) -> list[str]:
@@ -133,6 +185,8 @@ def merge_snapshots(
     merged_aps: dict[str, AccessPoint] = {}
     merged_networks: dict[str, WirelessNetwork] = {}
     merged_clients: dict[str, WirelessClient] = {}
+    fw_infos: list[FirmwareImageInfo] = []
+    first_fw_check: FirmwareCheckResult | None = None
 
     for node, snap in node_results:
         host = str(node.get("host", "")).strip()
@@ -156,6 +210,10 @@ def merge_snapshots(
 
         if first_summary is None:
             first_summary = snap.summary
+        if snap.firmware_info is not None:
+            fw_infos.append(snap.firmware_info)
+        if first_fw_check is None and snap.firmware_check is not None:
+            first_fw_check = snap.firmware_check
 
         if snap.access_points:
             for ap in snap.access_points:
@@ -220,6 +278,29 @@ def merge_snapshots(
         managed_via=first_summary.managed_via if first_summary else None,
     )
 
+    merged_fw_info: FirmwareImageInfo | None = None
+    if fw_infos:
+        all_classes: list[str] = []
+        all_statuses: list[ApUpgradeEntry] = []
+        for info in fw_infos:
+            for cls in info.image_classes:
+                if cls not in all_classes:
+                    all_classes.append(cls)
+            all_statuses.extend(info.ap_statuses)
+        lead = fw_infos[0]
+        merged_fw_info = FirmwareImageInfo(
+            primary_version=lead.primary_version,
+            primary_build_time=lead.primary_build_time,
+            backup_version=lead.backup_version,
+            backup_build_time=lead.backup_build_time,
+            image_classes=tuple(all_classes),
+            model_version_line=lead.model_version_line,
+            last_reboot_cause=lead.last_reboot_cause,
+            upgrade_in_progress=any(info.upgrade_in_progress for info in fw_infos),
+            auto_reboot=lead.auto_reboot,
+            ap_statuses=tuple(all_statuses),
+        )
+
     return ClusterSnapshot(
         summary=summary,
         networks=final_networks,
@@ -227,4 +308,6 @@ def merge_snapshots(
         clients=list(merged_clients.values()),
         fetched_at=fetched_at,
         master_ap_name=None,
+        firmware_info=merged_fw_info,
+        firmware_check=first_fw_check,
     )

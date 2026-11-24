@@ -45,6 +45,7 @@ from .const import (
     CONF_CONFIRM_ACTION,
     CONF_CONSIDER_HOME,
     CONF_ENABLE_ROAMING_SENSORS,
+    CONF_ENABLE_WRITE_CONTROLS,
     CONF_EXCLUDE_MACS,
     CONF_HOSTS,
     CONF_INCLUDE_WIRED_CLIENTS,
@@ -232,6 +233,9 @@ def _extract_filter_options(user_input: Mapping[str, Any]) -> dict[str, Any]:
         CONF_ENABLE_ROAMING_SENSORS: bool(
             user_input.get(CONF_ENABLE_ROAMING_SENSORS, False)
         ),
+        CONF_ENABLE_WRITE_CONTROLS: bool(
+            user_input.get(CONF_ENABLE_WRITE_CONTROLS, False)
+        ),
         CONF_SCAN_INTERVAL: int(
             user_input.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL)
         ),
@@ -323,6 +327,10 @@ def _build_filter_schema(
             vol.Required(
                 CONF_ENABLE_ROAMING_SENSORS,
                 default=bool(opts.get(CONF_ENABLE_ROAMING_SENSORS, False)),
+            ): BooleanSelector(),
+            vol.Required(
+                CONF_ENABLE_WRITE_CONTROLS,
+                default=bool(opts.get(CONF_ENABLE_WRITE_CONTROLS, False)),
             ): BooleanSelector(),
             vol.Required(
                 CONF_SCAN_INTERVAL,
@@ -479,8 +487,8 @@ class ArubaInstantConfigFlow(ConfigFlow, domain=DOMAIN):
             new_ap_id = str(new_node.get(CONF_AP_ID) or "")
             if old_ap_id and new_ap_id and old_ap_id != new_ap_id:
                 dev_reg = dr.async_get(self.hass)
-                old_dev = dev_reg.async_get_device(
-                    identifiers={(DOMAIN, f"ap_{entry.entry_id}_{old_ap_id}")}
+                old_dev = dev_reg.async_get_device_by_identifier(
+                    (DOMAIN, f"ap_{entry.entry_id}_{old_ap_id}"), entry.entry_id
                 )
                 if old_dev is not None:
                     dev_reg.async_remove_device(old_dev.id)
@@ -1151,8 +1159,8 @@ class ArubaInstantConfigFlow(ConfigFlow, domain=DOMAIN):
             if removed is not None:
                 ap_id = str(removed.get(CONF_AP_ID) or removed[CONF_HOST])
                 dev_reg = dr.async_get(self.hass)
-                ap_device = dev_reg.async_get_device(
-                    identifiers={(DOMAIN, f"ap_{entry.entry_id}_{ap_id}")}
+                ap_device = dev_reg.async_get_device_by_identifier(
+                    (DOMAIN, f"ap_{entry.entry_id}_{ap_id}"), entry.entry_id
                 )
                 if ap_device is not None:
                     dev_reg.async_remove_device(ap_device.id)

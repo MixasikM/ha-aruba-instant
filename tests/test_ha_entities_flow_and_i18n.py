@@ -14,13 +14,19 @@ import pytest
 
 from custom_components.aruba_instant import (
     async_remove_config_entry_device,
+    async_setup,
     async_setup_entry,
     async_unload_entry,
 )
 from custom_components.aruba_instant.adapters.rest_client import _redact_sid
 from custom_components.aruba_instant.binary_sensor import (
+    ArubaApConductorBinarySensor,
     ArubaApOnlineBinarySensor,
     async_setup_entry as async_setup_binary_sensor,
+)
+from custom_components.aruba_instant.button import (
+    ArubaApRebootButton,
+    async_setup_entry as async_setup_button,
 )
 from custom_components.aruba_instant.config_flow import (
     ArubaInstantConfigFlow,
@@ -32,6 +38,7 @@ from custom_components.aruba_instant.const import (
     CONF_CONFIRM_ACTION,
     CONF_CONSIDER_HOME,
     CONF_ENABLE_ROAMING_SENSORS,
+    CONF_ENABLE_WRITE_CONTROLS,
     CONF_EXCLUDE_MACS,
     CONF_HOSTS,
     CONF_NETWORK_NAME,
@@ -46,6 +53,7 @@ from custom_components.aruba_instant.const import (
     CONFIRM_ENABLE_REST,
     CONFIRM_USE_SSH_READONLY,
     DOMAIN,
+    SERVICE_PURGE_STALE_CLIENTS,
     TOPOLOGY_CLUSTER,
     TOPOLOGY_MULTI_AP,
     TRANSPORT_AUTO,
@@ -67,26 +75,48 @@ from custom_components.aruba_instant.ports.cluster_client import (
     ArubaRestApiDisabledError,
 )
 from custom_components.aruba_instant.sensor import (
+    ArubaApFirmwareSensor,
     ArubaApUptimeSensor,
     ArubaClientAccessPointSensor,
     ArubaClientSsidSensor,
+    ArubaClusterFirmwareSensor,
     ArubaClusterMasterApSensor,
     ArubaSsidClientsSensor,
     async_setup_entry as async_setup_sensor,
 )
+from custom_components.aruba_instant.switch import (
+    ArubaSsidEnabledSwitch,
+    async_setup_entry as async_setup_switch,
+)
+from custom_components.aruba_instant.update import (
+    ArubaClusterFirmwareUpdateEntity,
+    async_setup_entry as async_setup_update,
+)
+from homeassistant.components.update import UpdateEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.update_coordinator import UpdateFailed
+from homeassistant.util import dt as dt_util
 from tests.fixtures.aruba_8_10_samples import (
+    IMAGE_CHECK_ERROR_XML,
+    IMAGE_CHECK_SUCCESS_EMPTY_XML,
+    IMAGE_CHECK_UPDATE_XML,
     SHOW_APS_OUTPUT,
     SHOW_CLIENTS_OUTPUT,
+    SHOW_IMAGE_VERSION_OUTPUT,
     SHOW_NETWORK_OUTPUT,
     SHOW_SUMMARY_OUTPUT,
     SHOW_SUMMARY_STANDALONE_AOS10,
+    SHOW_UPGRADE_INFO_OUTPUT,
+    SHOW_VERSION_OUTPUT,
 )
-from custom_components.aruba_instant.engine.parsers import build_snapshot
+from custom_components.aruba_instant.engine.parsers import (
+    build_firmware_info,
+    build_snapshot,
+    parse_image_check_xml,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 INTEGRATION_DIR = REPO_ROOT / "custom_components" / "aruba_instant"
@@ -129,7 +159,7 @@ def test_manifest_hacs_brand_and_i18n_parity() -> None:
     assert keys[1] == "name"
     assert keys[2:] == sorted(keys[2:]), "manifest.json keys after name must be alphabetical"
     assert manifest["integration_type"] == "hub"
-    assert manifest["version"] == "0.1.5"
+    assert manifest["version"] == "0.2.0"
     assert manifest["categories"] == [
         "computers_network.routers_network",
         "presence_location.network_presence",
@@ -204,6 +234,7 @@ def test_public_release_files_zero_private_leaks() -> None:
         REPO_ROOT / ".gitignore",
         *INTEGRATION_DIR.rglob("*.py"),
         *INTEGRATION_DIR.rglob("*.json"),
+        *INTEGRATION_DIR.rglob("*.yaml"),
         *(REPO_ROOT / "tests").rglob("*.py"),
         *(REPO_ROOT / ".github").rglob("*.yml"),
     ]
@@ -410,7 +441,7 @@ async def test_config_flow_multi_ap_smart_auth_fallback_and_reconfigure(
     rem_done = await reconf_flow.async_step_remove_ap({CONF_TARGET_HOST: "192.0.2.11"})
     assert rem_done["type"] == "abort"
     assert len(entry.data[CONF_NODES]) == 1
-    assert dev_reg.async_get_device(identifiers={(DOMAIN, "ap_multi_1_SN00000001")}) is None
+    assert dev_reg.async_get_device_by_identifier((DOMAIN, "ap_multi_1_SN00000001"), "multi_1") is None
     assert ap_dev.id not in dev_reg.devices
 
 
@@ -512,9 +543,10 @@ async def test_coordinator_consider_home_reauth_entities_and_diagnostics() -> No
     assert getattr(
         ArubaClientScannerEntity, "_Entity__combined_unrecorded_attributes", frozenset()
     ) >= frozenset({"signal", "speed_mbps"})
-    # Restored away device keeps "Away-Phone" rather than overwriting with "Aruba Wi-Fi"
+    # Restored away device keeps "Away-Phone" and starts stale retention clock without flipping online
     assert by_eid["device_tracker.aruba_away_phone"].hostname == "Away-Phone"
     assert by_eid["device_tracker.aruba_away_phone"]._attr_device_info.name == "Away-Phone"
+    assert "aa:bb:cc:99:88:77" in coord.last_seen
 
     # Sensors: master_ap in cluster mode + 6ghz util on AP-Lobby + uptime 120s drift guard
     added_sensors: list[Any] = []
@@ -790,14 +822,18 @@ async def test_integration_setup_unload_binary_sensors_roaming_and_enable_rest(
     assert await async_remove_config_entry_device(hass, entry, stale_client_dev) is True  # type: ignore[arg-type]
 
     # Binary sensor & roaming sensor assertions
-    bin_entities: list[ArubaApOnlineBinarySensor] = []
+    bin_entities: list[Any] = []
     await async_setup_binary_sensor(hass, entry, bin_entities.extend)  # type: ignore[arg-type]
     assert {b.entity_id for b in bin_entities} == {
         "binary_sensor.aruba_ap_lobby_online",
         "binary_sensor.aruba_ap_lab_desk_online",
         "binary_sensor.aruba_ap_floor2_online",
+        "binary_sensor.aruba_ap_lobby_conductor",
+        "binary_sensor.aruba_ap_lab_desk_conductor",
+        "binary_sensor.aruba_ap_floor2_conductor",
     }
-    assert all(b.is_on is True for b in bin_entities)
+    assert all(b.is_on is True for b in bin_entities if isinstance(b, ArubaApOnlineBinarySensor))
+    assert any(isinstance(b, ArubaApConductorBinarySensor) and b.is_on is True for b in bin_entities)
 
     sensors: list[Any] = []
     await async_setup_sensor(hass, entry, sensors.extend)  # type: ignore[arg-type]
@@ -927,3 +963,244 @@ async def test_integration_setup_unload_binary_sensors_roaming_and_enable_rest(
     assert edit_done["type"] == "abort"
     assert multi_entry.data[CONF_NODES][1][CONF_HOST] == "192.0.2.15"
     assert multi_entry.data[CONF_NODES][1][CONF_PASSWORD] == "pw2"
+
+
+async def test_v020_firmware_channels_write_controls_and_purge_service() -> None:
+    hass = HomeAssistant()
+    now = datetime(2026, 11, 24, 22, 0, tzinfo=timezone.utc)
+    snap = build_snapshot(
+        SHOW_SUMMARY_OUTPUT, SHOW_NETWORK_OUTPUT, SHOW_APS_OUTPUT, SHOW_CLIENTS_OUTPUT, fetched_at=now
+    )
+    fw_info = build_firmware_info(
+        SHOW_IMAGE_VERSION_OUTPUT, SHOW_VERSION_OUTPUT, SHOW_UPGRADE_INFO_OUTPUT
+    )
+
+    class _FullMockClient:
+        def __init__(self) -> None:
+            self.fw_check = parse_image_check_xml(IMAGE_CHECK_ERROR_XML)
+            self.rebooted: list[str] = []
+            self.toggled: list[tuple[str, bool]] = []
+
+        async def async_fetch_snapshot(self) -> Any:
+            return snap
+
+        async def async_fetch_firmware_details(self) -> tuple[Any, Any]:
+            return fw_info, self.fw_check
+
+        async def async_reboot_ap(self, ap_ip: str) -> None:
+            self.rebooted.append(ap_ip)
+
+        async def async_set_ssid_enabled(self, profile_name: str, enabled: bool) -> None:
+            self.toggled.append((profile_name, enabled))
+
+        async def async_close(self) -> None:
+            return None
+
+    client = _FullMockClient()
+    entry = ConfigEntry(
+        entry_id="cluster_v2",
+        unique_id="cluster_192.0.2.10",
+        title="Aruba MainCluster",
+        data={CONF_TOPOLOGY_MODE: TOPOLOGY_CLUSTER, CONF_SITE_NAME: "MainCluster", CONF_NODES: []},
+        options={
+            CONF_TRACKED_SSIDS: ["CorpWiFi", "Guest WiFi"],
+            CONF_CONSIDER_HOME: 180,
+            CONF_ENABLE_WRITE_CONTROLS: True,
+        },
+    )
+    hass.config_entries._entries.append(entry)
+
+    coord = ArubaDataUpdateCoordinator(
+        hass=hass,
+        config_entry=entry,
+        client=client,  # type: ignore[arg-type]
+        site_name="MainCluster",
+        topology_mode=TOPOLOGY_CLUSTER,
+    )
+    dev_reg = dr.async_get(hass)
+    hub_dev = dev_reg.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, f"hub_{entry.entry_id}")},
+        name="Aruba MainCluster",
+    )
+    await coord.async_config_entry_first_refresh()
+    entry.runtime_data = type(
+        "Runtime",
+        (),
+        {
+            "coordinator": coord,
+            "client": client,
+            "cluster_device_id": hub_dev.id,
+            "site_name": "MainCluster",
+            "topology_mode": TOPOLOGY_CLUSTER,
+        },
+    )()
+
+    # 1. Binary sensors: conductor + AP hardware attributes (MAC, Serial, IP, Class)
+    bs_list: list[Any] = []
+    await async_setup_binary_sensor(hass, entry, bs_list.extend)  # type: ignore[arg-type]
+    bs_by_eid = {b.entity_id: b for b in bs_list}
+    online_lobby = bs_by_eid["binary_sensor.aruba_ap_lobby_online"]
+    assert isinstance(online_lobby, ArubaApOnlineBinarySensor)
+    assert online_lobby.extra_state_attributes["mac_address"] == "02:00:00:10:00:01"
+    assert online_lobby.extra_state_attributes["serial_number"] == "SN00000001"
+    assert online_lobby.extra_state_attributes["ap_class"] == "Hercules"
+    cond_lobby = bs_by_eid["binary_sensor.aruba_ap_lobby_conductor"]
+    cond_lab = bs_by_eid["binary_sensor.aruba_ap_lab_desk_conductor"]
+    assert isinstance(cond_lobby, ArubaApConductorBinarySensor)
+    assert cond_lobby.is_on is True
+    assert cond_lab.is_on is False
+
+    # 2. Sensors: radio channels, AP/cluster firmware, last_reboot_cause
+    sensors: list[Any] = []
+    await async_setup_sensor(hass, entry, sensors.extend)  # type: ignore[arg-type]
+    s_by_eid = {s.entity_id: s for s in sensors}
+    assert s_by_eid["sensor.aruba_ap_lobby_5ghz_channel"].native_value == "36E"
+    assert s_by_eid["sensor.aruba_ap_lobby_2_4ghz_channel"].native_value == "1"
+    assert s_by_eid["sensor.aruba_ap_lobby_6ghz_channel"].native_value == "37w"
+    ap_fw = s_by_eid["sensor.aruba_ap_lobby_firmware"]
+    assert isinstance(ap_fw, ArubaApFirmwareSensor)
+    assert "8.10.0.24_97188" in str(ap_fw.native_value)
+    assert ap_fw.extra_state_attributes["mac_address"] == "02:00:00:10:00:01"
+    cl_fw = s_by_eid["sensor.aruba_maincluster_firmware"]
+    assert isinstance(cl_fw, ArubaClusterFirmwareSensor)
+    assert cl_fw.extra_state_attributes["drt_version"] == "1.0_97611"
+    assert "Image Upgrade Successful" in s_by_eid["sensor.aruba_ap_lobby_uptime"].extra_state_attributes["last_reboot_cause"]
+
+    # 3. UpdateEntity 3-state contract: error -> unknown, success-empty -> off, new version -> on
+    updates: list[Any] = []
+    await async_setup_update(hass, entry, updates.extend)  # type: ignore[arg-type]
+    upd = updates[0]
+    assert isinstance(upd, ArubaClusterFirmwareUpdateEntity)
+    assert UpdateEntityFeature.PROGRESS in upd.supported_features
+    assert upd.state == "unknown"
+
+    client.fw_check = parse_image_check_xml(IMAGE_CHECK_SUCCESS_EMPTY_XML)
+    await coord.async_refresh_firmware_now()
+    assert upd.state == "off"
+
+    client.fw_check = parse_image_check_xml(IMAGE_CHECK_UPDATE_XML)
+    await coord.async_refresh_firmware_now()
+    assert upd.state == "on"
+    assert UpdateEntityFeature.INSTALL in upd.supported_features
+
+    # 4. Write controls: button + switch, and auto-disable when turned off
+    buttons: list[Any] = []
+    switches: list[Any] = []
+    await async_setup_button(hass, entry, buttons.extend)  # type: ignore[arg-type]
+    await async_setup_switch(hass, entry, switches.extend)  # type: ignore[arg-type]
+    btn_map = {b.entity_id: b for b in buttons}
+    sw_map = {s.entity_id: s for s in switches}
+    reboot_btn = btn_map["button.aruba_ap_lab_desk_reboot"]
+    assert isinstance(reboot_btn, ArubaApRebootButton)
+    await reboot_btn.async_press()
+    assert client.rebooted == ["192.0.2.12"]
+
+    guest_sw = sw_map["switch.aruba_maincluster_ssid_guest_wifi_enabled"]
+    assert isinstance(guest_sw, ArubaSsidEnabledSwitch)
+    await guest_sw.async_turn_off()
+    assert client.toggled == [("Guest WiFi", False)]
+
+    # Toggling enable_write_controls off disables existing button & switch registry entries
+    ent_reg = er.async_get(hass)
+    ent_reg.entities.items[reboot_btn.entity_id] = er.RegistryEntry(
+        entity_id=reboot_btn.entity_id,
+        domain="button",
+        platform=DOMAIN,
+        unique_id=str(reboot_btn.unique_id),
+        config_entry_id=entry.entry_id,
+    )
+    entry.options = {**entry.options, CONF_ENABLE_WRITE_CONTROLS: False}
+    coord.sync_registry_filters()
+    assert ent_reg.entities.items[reboot_btn.entity_id].disabled_by == er.RegistryEntryDisabler.INTEGRATION
+
+    # 5. Services: purge_stale_clients protects person-bound tracker & honors dry_run
+    await async_setup(hass, {})
+    old_seen = dt_util.utcnow() - timedelta(days=45)
+    coord.last_seen["aa:bb:cc:44:55:01"] = old_seen
+    coord.last_known_essid["aa:bb:cc:44:55:01"] = "Guest WiFi"
+    coord.last_seen["aa:bb:cc:44:55:02"] = old_seen
+    coord.last_known_essid["aa:bb:cc:44:55:02"] = "Guest WiFi"
+
+    dev_guest = dev_reg.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        connections={(dr.CONNECTION_NETWORK_MAC, "aa:bb:cc:44:55:02")},
+        name="Stale-Guest",
+    )
+    ent_reg.entities.items["device_tracker.aruba_person_phone"] = er.RegistryEntry(
+        entity_id="device_tracker.aruba_person_phone",
+        domain="device_tracker",
+        platform=DOMAIN,
+        unique_id=f"{entry.entry_id}_aa:bb:cc:44:55:01",
+        config_entry_id=entry.entry_id,
+    )
+    ent_reg.entities.items["device_tracker.aruba_stale_guest"] = er.RegistryEntry(
+        entity_id="device_tracker.aruba_stale_guest",
+        domain="device_tracker",
+        platform=DOMAIN,
+        unique_id=f"{entry.entry_id}_aa:bb:cc:44:55:02",
+        config_entry_id=entry.entry_id,
+        device_id=dev_guest.id,
+    )
+    hass.states.async_set(
+        "person.alex",
+        "not_home",
+        {"device_trackers": ["device_tracker.aruba_person_phone"]},
+    )
+
+    preview = await hass.services.async_call(
+        DOMAIN,
+        SERVICE_PURGE_STALE_CLIENTS,
+        {"stale_days": 30, "ssid": "Guest WiFi", "dry_run": True},
+        blocking=True,
+        return_response=True,
+    )
+    assert preview["dry_run"] is True
+    assert preview["purged_entities"] == ["device_tracker.aruba_stale_guest"]
+    assert preview["skipped_person_entities"] == ["device_tracker.aruba_person_phone"]
+    assert "device_tracker.aruba_stale_guest" in ent_reg.entities.items
+
+    executed = await hass.services.async_call(
+        DOMAIN,
+        SERVICE_PURGE_STALE_CLIENTS,
+        {"stale_days": 30, "ssid": "Guest WiFi", "dry_run": False},
+        blocking=True,
+        return_response=True,
+    )
+    assert executed["purged_entities"] == ["device_tracker.aruba_stale_guest"]
+    assert "device_tracker.aruba_stale_guest" not in ent_reg.entities.items
+    assert "device_tracker.aruba_person_phone" in ent_reg.entities.items
+    assert dev_guest.id not in dev_reg.devices
+
+    # Shared device with another integration's remaining entity must NOT be deleted
+    shared_dev = dev_reg.async_get_or_create(
+        config_entry_id="other_integration",
+        connections={(dr.CONNECTION_NETWORK_MAC, "aa:bb:cc:44:55:03")},
+        name="Shared-Phone",
+    )
+    ent_reg.entities.items["device_tracker.other_shared_phone"] = er.RegistryEntry(
+        entity_id="device_tracker.other_shared_phone",
+        domain="device_tracker",
+        platform="other",
+        unique_id="other_1",
+        config_entry_id="other_integration",
+        device_id=shared_dev.id,
+    )
+    ent_reg.entities.items["device_tracker.aruba_shared_phone"] = er.RegistryEntry(
+        entity_id="device_tracker.aruba_shared_phone",
+        domain="device_tracker",
+        platform=DOMAIN,
+        unique_id=f"{entry.entry_id}_aa:bb:cc:44:55:03",
+        config_entry_id=entry.entry_id,
+        device_id=shared_dev.id,
+    )
+    coord.last_seen["aa:bb:cc:44:55:03"] = old_seen
+    shared_res = await hass.services.async_call(
+        DOMAIN,
+        SERVICE_PURGE_STALE_CLIENTS,
+        {"stale_days": 30, "dry_run": False},
+        blocking=True,
+        return_response=True,
+    )
+    assert "device_tracker.aruba_shared_phone" in shared_res["purged_entities"]
+    assert shared_dev.id in dev_reg.devices

@@ -124,6 +124,7 @@
           "min_signal": "Minimaler SNR-Signalwert",
           "exclude_macs": "Ausgeschlossene MAC-Adressen",
           "enable_roaming_sensors": "Client-Roaming-Sensoren erstellen (AP & SSID)",
+          "enable_write_controls": "AP- & SSID-Schreibsteuerung aktivieren",
           "scan_interval": "Abfrageintervall (Sekunden)",
           "consider_home": "Nachlaufzeit „Zu Hause“ (Sekunden)"
         },
@@ -137,6 +138,7 @@
           "min_signal": "Schwache Nachbar-Assoziationen unterhalb dieses SNR-Werts ignorieren (0 deaktiviert den Filter).",
           "exclude_macs": "Kommagetrennte Liste auszuschließender MAC-Adressen.",
           "enable_roaming_sensors": "Erstellt zusätzliche Diagnose-Sensoren für Access Point und SSID je Client (standardmäßig aus).",
+          "enable_write_controls": "Optionale Steuerschalter, AP-Neustart-Buttons und Firmware-Upgrade-Aktionen. Für reinen Lesebetrieb ausgeschaltet lassen (auf schreibgeschützten Central-/AOS-10-Konten nicht verfügbar).",
           "scan_interval": "Wie oft AP- und Client-Daten von Aruba abgerufen werden (5–300 s).",
           "consider_home": "Toleranzzeit, bevor ein schlafendes Smartphone als abwesend markiert wird (verhindert WLAN-Energiespar-Flapping)."
         }
@@ -300,6 +302,7 @@
           "min_signal": "Minimaler SNR-Signalwert",
           "exclude_macs": "Ausgeschlossene MAC-Adressen",
           "enable_roaming_sensors": "Client-Roaming-Sensoren erstellen (AP & SSID)",
+          "enable_write_controls": "AP- & SSID-Schreibsteuerung aktivieren",
           "scan_interval": "Abfrageintervall (Sekunden)",
           "consider_home": "Nachlaufzeit „Zu Hause“ (Sekunden)"
         },
@@ -313,6 +316,7 @@
           "min_signal": "Schwache Nachbar-Assoziationen unterhalb dieses SNR-Werts ignorieren (0 deaktiviert den Filter).",
           "exclude_macs": "Kommagetrennte Liste auszuschließender MAC-Adressen.",
           "enable_roaming_sensors": "Erstellt zusätzliche Diagnose-Sensoren für Access Point und SSID je Client.",
+          "enable_write_controls": "Optionale Steuerschalter, AP-Neustart-Buttons und Firmware-Upgrade-Aktionen. Für reinen Lesebetrieb ausgeschaltet lassen (auf schreibgeschützten Central-/AOS-10-Konten nicht verfügbar).",
           "scan_interval": "Wie oft AP- und Client-Daten von Aruba abgerufen werden (5–300 s).",
           "consider_home": "Toleranzzeit, bevor ein schlafendes Smartphone als abwesend markiert wird (verhindert WLAN-Energiespar-Flapping)."
         }
@@ -348,6 +352,35 @@
       "master_ap": {
         "name": "Master-AP"
       },
+      "cluster_firmware": {
+        "name": "Cluster-Firmware",
+        "state_attributes": {
+          "backup_firmware": {
+            "name": "Backup-Partition-Firmware"
+          },
+          "primary_build_time": {
+            "name": "Erstellungszeitpunkt (Primary)"
+          },
+          "backup_build_time": {
+            "name": "Erstellungszeitpunkt (Backup)"
+          },
+          "image_classes": {
+            "name": "AP-Image-Klassen"
+          },
+          "model_version": {
+            "name": "ArubaOS-Versionszeile"
+          },
+          "last_reboot_cause": {
+            "name": "Ursache des letzten Neustarts"
+          },
+          "upgrade_in_progress": {
+            "name": "Upgrade aktiv"
+          },
+          "drt_version": {
+            "name": "Verfügbare DRT-Version"
+          }
+        }
+      },
       "ssid_clients": {
         "name": "SSID {ssid} Clients"
       },
@@ -363,8 +396,45 @@
       "utilization_6ghz": {
         "name": "Kanalauslastung 6 GHz"
       },
+      "channel_5ghz": {
+        "name": "Kanal 5 GHz"
+      },
+      "channel_2_4ghz": {
+        "name": "Kanal 2,4 GHz"
+      },
+      "channel_6ghz": {
+        "name": "Kanal 6 GHz"
+      },
+      "ap_firmware": {
+        "name": "Firmware",
+        "state_attributes": {
+          "backup_firmware": {
+            "name": "Backup-Partition-Firmware"
+          },
+          "ap_class": {
+            "name": "AP-Image-Klasse"
+          },
+          "upgrade_status": {
+            "name": "Upgrade-Status"
+          },
+          "upgrade_error": {
+            "name": "Upgrade-Fehler"
+          },
+          "serial_number": {
+            "name": "Seriennummer"
+          },
+          "mac_address": {
+            "name": "MAC-Adresse"
+          }
+        }
+      },
       "uptime": {
-        "name": "Letzter Neustart"
+        "name": "Letzter Neustart",
+        "state_attributes": {
+          "last_reboot_cause": {
+            "name": "Ursache des letzten Neustarts"
+          }
+        }
       },
       "client_access_point": {
         "name": "Aruba Access Point"
@@ -375,7 +445,73 @@
     },
     "binary_sensor": {
       "ap_online": {
-        "name": "Online"
+        "name": "Online",
+        "state_attributes": {
+          "ip_address": {
+            "name": "IP-Adresse"
+          },
+          "mac_address": {
+            "name": "MAC-Adresse"
+          },
+          "serial_number": {
+            "name": "Seriennummer"
+          },
+          "model": {
+            "name": "Modell"
+          },
+          "ap_class": {
+            "name": "AP-Image-Klasse"
+          },
+          "is_conductor": {
+            "name": "Aktiver Controller"
+          }
+        }
+      },
+      "ap_conductor": {
+        "name": "Aktiver Controller"
+      }
+    },
+    "update": {
+      "cluster_firmware_update": {
+        "name": "Cluster-Firmware",
+        "state_attributes": {
+          "backup_firmware": {
+            "name": "Backup-Partition-Firmware"
+          },
+          "image_classes": {
+            "name": "AP-Image-Klassen"
+          },
+          "image_server_state": {
+            "name": "Image-Server-Status"
+          },
+          "image_server_message": {
+            "name": "Image-Server-Meldung"
+          },
+          "drt_version": {
+            "name": "Verfügbare DRT-Version"
+          }
+        }
+      }
+    },
+    "button": {
+      "ap_reboot": {
+        "name": "Access Point neu starten"
+      }
+    },
+    "switch": {
+      "ssid_enabled": {
+        "name": "SSID {ssid}",
+        "state_attributes": {
+          "profile_name": {
+            "name": "Profilname"
+          },
+          "essid": {
+            "name": "ESSID"
+          },
+          "network_type": {
+            "name": "Netzwerktyp"
+          }
+        }
       }
     },
     "device_tracker": {
@@ -416,9 +552,74 @@
       }
     }
   },
+  "services": {
+    "purge_stale_clients": {
+      "name": "Veraltete Clients bereinigen",
+      "description": "Sucht veraltete Aruba-Geräte-Tracker außerhalb des Aufbewahrungsfensters und entfernt sie optional (Tracker mit verknüpfter Person werden standardmäßig geschützt).",
+      "fields": {
+        "config_entry_id": {
+          "name": "Integrationseintrag",
+          "description": "Optionaler Aruba-Instant-Hub-Eintrag; ohne Angabe werden alle geladenen Einträge geprüft."
+        },
+        "stale_days": {
+          "name": "Schwellenwert (Tage)",
+          "description": "Mindestanzahl an Tagen seit der letzten Sichtung eines Clients."
+        },
+        "ssid": {
+          "name": "Nach SSID filtern",
+          "description": "Optionaler ESSID-Filter (z. B. um nur temporäre Gast-WLAN-Clients zu bereinigen)."
+        },
+        "skip_person_bound": {
+          "name": "Personen-Tracker schützen",
+          "description": "Entfernt niemals Tracker, die einer Home-Assistant-Person zugeordnet sind."
+        },
+        "dry_run": {
+          "name": "Testlauf (nur Vorschau)",
+          "description": "Gibt passende Entitäten zurück, ohne etwas aus Home Assistant zu löschen."
+        }
+      }
+    },
+    "upgrade_firmware": {
+      "name": "Cluster-Firmware aktualisieren",
+      "description": "Startet ein InstantOS-Firmware-Upgrade über eine selbst gehostete HTTP/HTTPS-URL (erfordert aktivierte Schreibsteuerung in den Optionen).",
+      "fields": {
+        "config_entry_id": {
+          "name": "Integrationseintrag",
+          "description": "Zu aktualisierender Aruba-Instant-Hub-Eintrag (erforderlich bei mehreren Hubs)."
+        },
+        "image_url": {
+          "name": "Firmware-Image-URL",
+          "description": "HTTP- oder HTTPS-URL zur gehosteten Aruba-AP-Firmware-Datei."
+        },
+        "ap_class": {
+          "name": "AP-Image-Klasse",
+          "description": "Optionale AP-Hardwareklasse (z. B. Hercules oder Centaurus), falls im Cluster mehrere Klassen vorhanden sind."
+        },
+        "auto_reboot": {
+          "name": "Automatischer Neustart nach Upgrade",
+          "description": "Access Points nach dem Flashen automatisch neu starten."
+        }
+      }
+    }
+  },
   "exceptions": {
     "ap_auth_failed": {
       "message": "Authentifizierung für Aruba Access Point(s) fehlgeschlagen: {host}"
+    },
+    "write_controls_disabled": {
+      "message": "Aktivieren Sie zuerst „AP- & SSID-Schreibsteuerung aktivieren“ in den Aruba-Instant-Optionen."
+    },
+    "action_failed": {
+      "message": "Aruba-Instant-Aktion fehlgeschlagen: {error}"
+    },
+    "ambiguous_ap_class": {
+      "message": "Eindeutige AP-Image-Klasse konnte nicht automatisch ermittelt werden; geben Sie ap_class explizit an."
+    },
+    "entry_not_loaded": {
+      "message": "Der ausgewählte Aruba-Instant-Integrationseintrag ist nicht geladen."
+    },
+    "config_entry_required": {
+      "message": "Mehrere Aruba-Instant-Einträge konfiguriert; bitte config_entry_id angeben."
     }
   }
 }

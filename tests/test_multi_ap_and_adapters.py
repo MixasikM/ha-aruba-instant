@@ -26,6 +26,7 @@ from custom_components.aruba_instant.ports.cluster_client import (
     BaseArubaClusterClient,
 )
 from tests.fixtures.aruba_8_10_samples import (
+    IMAGE_CHECK_SUCCESS_EMPTY_XML,
     MULTI_AP_NODE1_CLIENTS,
     MULTI_AP_NODE2_CLIENTS,
     REST_503_DISABLED_BODY,
@@ -36,9 +37,12 @@ from tests.fixtures.aruba_8_10_samples import (
     SHOW_APS_SINGLE_SSH_RAW,
     SHOW_CLIENTS_OUTPUT,
     SHOW_CLIENTS_SSH_RAW,
+    SHOW_IMAGE_VERSION_OUTPUT,
     SHOW_NETWORK_OUTPUT,
     SHOW_SUMMARY_OUTPUT,
     SHOW_SUMMARY_STANDALONE_AOS10,
+    SHOW_UPGRADE_INFO_OUTPUT,
+    SHOW_VERSION_OUTPUT,
 )
 
 
@@ -366,3 +370,118 @@ async def test_multi_ap_cluster_client_partial_outage_and_auth_error() -> None:
     with pytest.raises(ArubaMultiAuthError) as exc:
         await auth_pool.async_fetch_snapshot()
     assert exc.value.failed_hosts == ["198.51.100.32"]
+
+
+async def test_rest_and_ssh_firmware_and_write_controls(monkeypatch: pytest.MonkeyPatch) -> None:
+    posts: list[tuple[str, Any, Any]] = []
+
+    class _FirmwareSession:
+        def post(self, url: str, **kwargs: Any) -> _FakeResponse:
+            posts.append((url, kwargs.get("params"), kwargs.get("json")))
+            if url.endswith("/rest/login"):
+                return _FakeResponse(200, REST_LOGIN_SUCCESS_JSON)
+            return _FakeResponse(200, {"Status": "Success", "Status-code": 0})
+
+        def get(self, url: str, **kwargs: Any) -> _FakeResponse:
+            if url.endswith("/swarm.cgi"):
+                return _FakeResponse(200, IMAGE_CHECK_SUCCESS_EMPTY_XML)
+            cmd = (kwargs.get("params") or {}).get("cmd", "")
+            if cmd == "show image version":
+                return _FakeResponse(200, {"Command output": SHOW_IMAGE_VERSION_OUTPUT})
+            if cmd == "show version":
+                return _FakeResponse(200, {"Command output": SHOW_VERSION_OUTPUT})
+            if cmd == "show upgrade info":
+                return _FakeResponse(200, {"Command output": SHOW_UPGRADE_INFO_OUTPUT})
+            return _FakeResponse(200, {"Command output": ""})
+
+    client = ArubaRestClient(_FirmwareSession(), "192.0.2.10", "admin", "pw")  # type: ignore[arg-type]
+    fw_info, fw_check = await client.async_fetch_firmware_details()
+    assert fw_info is not None and fw_info.image_classes == ("Hercules",)
+    assert fw_check is not None and fw_check.server_state == "success"
+
+    await client.async_reboot_ap("192.0.2.12")
+    await client.async_set_ssid_enabled("Guest_Profile", False)
+    await client.async_upgrade_firmware("http://192.0.2.50/img.bin", ap_class="Hercules")
+    assert any("/rest/reboot" in u and j["iap_ip_addr"] == "192.0.2.12" for u, _, j in posts)
+    assert any(
+        "/rest/ssid" in u
+        and j.get("iap_ip_addr") == "192.0.2.10"
+        and j["ssid-profile"]["disable"] == "yes"
+        for u, _, j in posts
+    )
+    assert any("/rest/os-upgrade" in u and "Hercules-url" in j["upgrade-info"] for u, _, j in posts)
+
+    # SSH reload (y/n) confirmation, drain(), and hostname-resolved local IP guard
+    written: list[str] = []
+
+    class _RebootProc:
+        def __init__(self) -> None:
+            self.step = 0
+            self.drained = False
+
+            class _In:
+                def write(self_in, data: str) -> None:
+                    written.append(data)
+
+                async def drain(self_in) -> None:
+                    self.drained = True
+
+            self.stdin = _In()
+            self.stdout = type("_Out", (), {"read": self._read})()
+
+        async def _read(self, _n: int) -> str:
+            self.step += 1
+            if self.step == 1:
+                return "AP-Standalone# "
+            if self.step == 2:
+                return "Do you really want to reset the system(y/n):"
+            return ""
+
+        def close(self) -> None:
+            return None
+
+    class _RebootConn:
+        async def create_process(self, **_kw: Any) -> _RebootProc:
+            return _RebootProc()
+
+        def close(self) -> None:
+            return None
+
+        async def wait_closed(self) -> None:
+            return None
+
+    async def fake_connect(**_kw: Any) -> _RebootConn:
+        return _RebootConn()
+
+    monkeypatch.setattr(asyncssh, "connect", fake_connect)
+    ssh = ArubaSshClient("ap-standalone.example.test", "admin", "pw")
+    ssh._local_ap_ip = "198.51.100.21"
+    with pytest.raises(ArubaReadOnlyCliError):
+        await ssh.async_reboot_ap("198.51.100.22")
+    await ssh.async_reboot_ap("198.51.100.21")
+    assert written == ["reload\n", "y\n"]
+
+    # MultiApClusterClient reboot routes only to matching node
+    called: list[str] = []
+
+    class _StubReboot(BaseArubaClusterClient):
+        def __init__(self, tag: str) -> None:
+            self.tag = tag
+
+        async def async_fetch_snapshot(self) -> ClusterSnapshot:
+            return ClusterSnapshot(summary=parse_summary(SHOW_SUMMARY_STANDALONE_AOS10))
+
+        async def async_close(self) -> None:
+            return None
+
+        async def async_reboot_ap(self, ap_ip: str) -> None:
+            called.append(f"{self.tag}:{ap_ip}")
+
+    pool = MultiApClusterClient(
+        session=None,  # type: ignore[arg-type]
+        nodes=[{"host": "198.51.100.31"}, {"host": "198.51.100.32"}],
+        site_name="Campus",
+        node_clients=[_StubReboot("n1"), _StubReboot("n2")],
+    )
+    await pool.async_reboot_ap("198.51.100.32")
+    assert called == ["n2:198.51.100.32"]

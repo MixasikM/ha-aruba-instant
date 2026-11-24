@@ -124,6 +124,7 @@
           "min_signal": "Minimum SNR signal threshold",
           "exclude_macs": "Excluded MAC addresses",
           "enable_roaming_sensors": "Create per-client roaming sensors (AP & SSID)",
+          "enable_write_controls": "Enable AP & SSID write controls",
           "scan_interval": "Polling interval (seconds)",
           "consider_home": "Consider home duration (seconds)"
         },
@@ -137,6 +138,7 @@
           "min_signal": "Ignore weak neighbor associations below this SNR value (0 disables).",
           "exclude_macs": "Comma-separated list of MAC addresses to exclude completely.",
           "enable_roaming_sensors": "Adds diagnostic Access Point and SSID sensors per client (disabled by default to reduce entity count).",
+          "enable_write_controls": "Opt-in control switches, AP restart buttons, and firmware upgrade actions. Keep off for 100% read-only operation (unsupported on Central-managed read-only AOS 10).",
           "scan_interval": "How often to poll Aruba for AP and client updates (5–300 s).",
           "consider_home": "Grace period before marking a sleeping smartphone away (prevents Wi-Fi power-save flapping)."
         }
@@ -300,6 +302,7 @@
           "min_signal": "Minimum SNR signal threshold",
           "exclude_macs": "Excluded MAC addresses",
           "enable_roaming_sensors": "Create per-client roaming sensors (AP & SSID)",
+          "enable_write_controls": "Enable AP & SSID write controls",
           "scan_interval": "Polling interval (seconds)",
           "consider_home": "Consider home duration (seconds)"
         },
@@ -313,6 +316,7 @@
           "min_signal": "Ignore weak neighbor associations below this SNR value (0 disables).",
           "exclude_macs": "Comma-separated list of MAC addresses to exclude completely.",
           "enable_roaming_sensors": "Adds diagnostic Access Point and SSID sensors per client.",
+          "enable_write_controls": "Opt-in control switches, AP restart buttons, and firmware upgrade actions. Keep off for 100% read-only operation (unsupported on Central-managed read-only AOS 10).",
           "scan_interval": "How often to poll Aruba for AP and client updates (5–300 s).",
           "consider_home": "Grace period before marking a sleeping smartphone away (prevents Wi-Fi power-save flapping)."
         }
@@ -348,6 +352,35 @@
       "master_ap": {
         "name": "Master AP"
       },
+      "cluster_firmware": {
+        "name": "Cluster firmware",
+        "state_attributes": {
+          "backup_firmware": {
+            "name": "Backup partition firmware"
+          },
+          "primary_build_time": {
+            "name": "Primary build time"
+          },
+          "backup_build_time": {
+            "name": "Backup build time"
+          },
+          "image_classes": {
+            "name": "AP image classes"
+          },
+          "model_version": {
+            "name": "ArubaOS version line"
+          },
+          "last_reboot_cause": {
+            "name": "Last reboot cause"
+          },
+          "upgrade_in_progress": {
+            "name": "Upgrade in progress"
+          },
+          "drt_version": {
+            "name": "Available DRT version"
+          }
+        }
+      },
       "ssid_clients": {
         "name": "SSID {ssid} clients"
       },
@@ -363,8 +396,45 @@
       "utilization_6ghz": {
         "name": "6 GHz utilization"
       },
+      "channel_5ghz": {
+        "name": "5 GHz channel"
+      },
+      "channel_2_4ghz": {
+        "name": "2.4 GHz channel"
+      },
+      "channel_6ghz": {
+        "name": "6 GHz channel"
+      },
+      "ap_firmware": {
+        "name": "Firmware",
+        "state_attributes": {
+          "backup_firmware": {
+            "name": "Backup partition firmware"
+          },
+          "ap_class": {
+            "name": "AP image class"
+          },
+          "upgrade_status": {
+            "name": "Upgrade status"
+          },
+          "upgrade_error": {
+            "name": "Upgrade error"
+          },
+          "serial_number": {
+            "name": "Serial number"
+          },
+          "mac_address": {
+            "name": "MAC address"
+          }
+        }
+      },
       "uptime": {
-        "name": "Last restart"
+        "name": "Last restart",
+        "state_attributes": {
+          "last_reboot_cause": {
+            "name": "Last reboot cause"
+          }
+        }
       },
       "client_access_point": {
         "name": "Aruba Access Point"
@@ -375,7 +445,73 @@
     },
     "binary_sensor": {
       "ap_online": {
-        "name": "Online"
+        "name": "Online",
+        "state_attributes": {
+          "ip_address": {
+            "name": "IP address"
+          },
+          "mac_address": {
+            "name": "MAC address"
+          },
+          "serial_number": {
+            "name": "Serial number"
+          },
+          "model": {
+            "name": "Model"
+          },
+          "ap_class": {
+            "name": "AP image class"
+          },
+          "is_conductor": {
+            "name": "Active Conductor"
+          }
+        }
+      },
+      "ap_conductor": {
+        "name": "Active Conductor"
+      }
+    },
+    "update": {
+      "cluster_firmware_update": {
+        "name": "Cluster firmware",
+        "state_attributes": {
+          "backup_firmware": {
+            "name": "Backup partition firmware"
+          },
+          "image_classes": {
+            "name": "AP image classes"
+          },
+          "image_server_state": {
+            "name": "Image server state"
+          },
+          "image_server_message": {
+            "name": "Image server message"
+          },
+          "drt_version": {
+            "name": "Available DRT version"
+          }
+        }
+      }
+    },
+    "button": {
+      "ap_reboot": {
+        "name": "Restart Access Point"
+      }
+    },
+    "switch": {
+      "ssid_enabled": {
+        "name": "SSID {ssid}",
+        "state_attributes": {
+          "profile_name": {
+            "name": "Profile name"
+          },
+          "essid": {
+            "name": "ESSID"
+          },
+          "network_type": {
+            "name": "Network type"
+          }
+        }
       }
     },
     "device_tracker": {
@@ -416,9 +552,74 @@
       }
     }
   },
+  "services": {
+    "purge_stale_clients": {
+      "name": "Purge stale clients",
+      "description": "Find and optionally remove stale Aruba device trackers not seen within the configured retention window (skipping trackers bound to Home Assistant persons by default).",
+      "fields": {
+        "config_entry_id": {
+          "name": "Integration entry",
+          "description": "Optional Aruba Instant hub entry to scan; scans all loaded entries when omitted."
+        },
+        "stale_days": {
+          "name": "Stale threshold (days)",
+          "description": "Minimum number of days since a client was last seen before it qualifies for cleanup."
+        },
+        "ssid": {
+          "name": "Filter by SSID",
+          "description": "Optional ESSID filter (for example, clean up only temporary guest Wi-Fi clients)."
+        },
+        "skip_person_bound": {
+          "name": "Protect person trackers",
+          "description": "Never remove device trackers attached to any Home Assistant person entity."
+        },
+        "dry_run": {
+          "name": "Dry run (preview only)",
+          "description": "Return matching entities without deleting anything from Home Assistant."
+        }
+      }
+    },
+    "upgrade_firmware": {
+      "name": "Upgrade cluster firmware",
+      "description": "Trigger an InstantOS firmware upgrade from a self-hosted HTTP/HTTPS image URL (requires write controls enabled in Options).",
+      "fields": {
+        "config_entry_id": {
+          "name": "Integration entry",
+          "description": "Aruba Instant hub entry to upgrade (required when multiple hubs are configured)."
+        },
+        "image_url": {
+          "name": "Firmware image URL",
+          "description": "HTTP or HTTPS URL where the Aruba AP image binary is hosted."
+        },
+        "ap_class": {
+          "name": "AP image class",
+          "description": "Optional AP hardware class (such as Hercules or Centaurus) when multiple classes exist in the cluster."
+        },
+        "auto_reboot": {
+          "name": "Auto-reboot after upgrade",
+          "description": "Automatically reboot APs once the firmware image is flashed."
+        }
+      }
+    }
+  },
   "exceptions": {
     "ap_auth_failed": {
       "message": "Authentication failed for Aruba Access Point(s): {host}"
+    },
+    "write_controls_disabled": {
+      "message": "Enable 'AP & SSID write controls' in Aruba Instant Options before running control actions."
+    },
+    "action_failed": {
+      "message": "Aruba Instant action failed: {error}"
+    },
+    "ambiguous_ap_class": {
+      "message": "Could not determine a unique AP image class automatically; specify ap_class explicitly."
+    },
+    "entry_not_loaded": {
+      "message": "The selected Aruba Instant integration entry is not loaded."
+    },
+    "config_entry_required": {
+      "message": "Multiple Aruba Instant entries are configured; specify config_entry_id."
     }
   }
 }
