@@ -168,6 +168,8 @@ def test_manifest_hacs_brand_and_i18n_parity() -> None:
     hacs = json.loads((REPO_ROOT / "hacs.json").read_text(encoding="utf-8"))
     assert "render_readme" not in hacs
     assert hacs["homeassistant"] == "2026.11.0"
+    assert hacs["zip_release"] is True
+    assert hacs["filename"] == "aruba_instant.zip"
 
     license_text = (REPO_ROOT / "LICENSE").read_text(encoding="utf-8")
     assert "Apache License" in license_text and "Version 2.0" in license_text
