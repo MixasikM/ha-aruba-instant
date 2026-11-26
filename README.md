@@ -8,7 +8,7 @@
   </picture>
 </p>
 
-Local Wi-Fi presence detection and real-time access point telemetry for HPE Aruba Instant and AOS Wi-Fi networks in Home Assistant.
+A modern, UI-configured replacement for the removed legacy built-in Home Assistant `aruba` integration — built for HPE Aruba Instant (`IAP-2xx / 3xx / 5xx / 6xx`, including `IAP-315`, `IAP-325`, `AP-505`, `AP-515`, `AP-635`) clusters and `AOS 10` access points, delivering fast local Wi-Fi presence detection and real-time AP telemetry.
 
 [![Open your Home Assistant instance and open a repository in the Marketplace.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=MixasikM&repository=ha-aruba-instant&category=integration)
 
