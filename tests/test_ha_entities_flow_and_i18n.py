@@ -91,6 +91,7 @@ from custom_components.aruba_instant.switch import (
 )
 from custom_components.aruba_instant.update import (
     ArubaClusterFirmwareUpdateEntity,
+    _build_aruba_release_url,
     async_setup_entry as async_setup_update,
 )
 from homeassistant.components.update import UpdateEntityFeature
@@ -160,7 +161,7 @@ def test_manifest_hacs_brand_and_i18n_parity() -> None:
     assert keys[1] == "name"
     assert keys[2:] == sorted(keys[2:]), "manifest.json keys after name must be alphabetical"
     assert manifest["integration_type"] == "hub"
-    assert manifest["version"] == "0.3.0"
+    assert manifest["version"] == "0.3.1"
     assert manifest["categories"] == [
         "computers_network.routers_network",
         "presence_location.network_presence",
@@ -1071,22 +1072,98 @@ async def test_v020_firmware_channels_write_controls_and_purge_service() -> None
     assert cl_fw.extra_state_attributes["drt_version"] == "1.0_97611"
     assert "Image Upgrade Successful" in s_by_eid["sensor.aruba_ap_lobby_uptime"].extra_state_attributes["last_reboot_cause"]
 
-    # 3. UpdateEntity 3-state contract: error -> unknown, success-empty -> off, new version -> on
+    # 3. UpdateEntity 3-state contract + RELEASE_NOTES / release_summary / release-train release_url
     updates: list[Any] = []
     await async_setup_update(hass, entry, updates.extend)  # type: ignore[arg-type]
     upd = updates[0]
     assert isinstance(upd, ArubaClusterFirmwareUpdateEntity)
     assert UpdateEntityFeature.PROGRESS in upd.supported_features
+    assert UpdateEntityFeature.RELEASE_NOTES in upd.supported_features
+    expected_810_url = (
+        "https://arubanetworking.hpe.com/techdocs/instant-mode/oxygen/"
+        "Instant%20Consolidated%20Release%20Notes%20Portal/"
+        "instant-aos-8-10-x-x/instant-aos-8-10-x-x.html"
+    )
+    assert upd.release_url == expected_810_url
+    assert _build_aruba_release_url("8.6.0.5_74000") == (
+        "https://arubanetworking.hpe.com/techdocs/instant-mode/oxygen/"
+        "Instant%20Consolidated%20Release%20Notes%20Portal/"
+        "instant-aos-8-6-x-x/instant-aos-8-6-x-x.html"
+    )
+    assert _build_aruba_release_url("8.7.1.0_80000") is None
+    assert _build_aruba_release_url("10.6.0.2_89001") is None
+    assert _build_aruba_release_url("1.8.10.0.24") is None
+    assert _build_aruba_release_url("8.11.2.2_90000") == (
+        "https://arubanetworking.hpe.com/techdocs/instant-mode/oxygen/"
+        "Instant%20Consolidated%20Release%20Notes%20Portal/"
+        "GUID-D0F825FC-9AF1-42A6-95D8-9A628C99660F.html"
+    )
     assert upd.state == "unknown"
+    assert upd.release_summary is not None and len(upd.release_summary) <= 255
+    assert "Installed: 8.10.0.24_97188" in upd.release_summary
+    err_notes = await upd.async_release_notes()
+    assert err_notes is not None and "Maintenance → Firmware" in err_notes
+    assert f"[Open full HPE Aruba InstantOS release notes]({expected_810_url})" in err_notes
 
     client.fw_check = parse_image_check_xml(IMAGE_CHECK_SUCCESS_EMPTY_XML)
     await coord.async_refresh_firmware_now()
     assert upd.state == "off"
+    ok_notes = await upd.async_release_notes()
+    assert ok_notes is not None and "latest reported InstantOS build" in ok_notes
 
     client.fw_check = parse_image_check_xml(IMAGE_CHECK_UPDATE_XML)
     await coord.async_refresh_firmware_now()
     assert upd.state == "on"
+    assert upd.release_url == expected_810_url
     assert UpdateEntityFeature.INSTALL in upd.supported_features
+    assert upd.release_summary is not None and len(upd.release_summary) <= 255
+    assert "Available: 8.10.0.25_98000" in upd.release_summary
+    rw_notes = await upd.async_release_notes()
+    assert rw_notes is not None and "automatically reboot all access points" in rw_notes
+    assert "aruba_instant.upgrade_firmware" not in rw_notes
+
+    # Read-only mode: points user to UI settings path without service jargon
+    entry.options = {**entry.options, CONF_ENABLE_WRITE_CONTROLS: False}
+    ro_notes = await upd.async_release_notes()
+    assert ro_notes is not None
+    assert "Settings → Devices &amp; Services → Aruba Instant / AOS Wi-Fi → Configure" in ro_notes
+    assert "Maintenance → Firmware" in ro_notes
+    assert "aruba_instant.upgrade_firmware" not in ro_notes
+
+    # Multi-class cluster with write controls enabled: disables 1-click install cleanly
+    entry.options = {**entry.options, CONF_ENABLE_WRITE_CONTROLS: True}
+    from dataclasses import replace as _replace_dc
+
+    orig_fw_info = coord._firmware_info
+    coord._firmware_info = _replace_dc(
+        fw_info,
+        image_classes=("Hercules", "Gemini"),
+        last_reboot_cause="Watchdog <reset> `test`",
+    )
+    coord.data = _replace_dc(coord.data, firmware_info=coord._firmware_info)
+    multi_notes = await upd.async_release_notes()
+    assert UpdateEntityFeature.INSTALL not in upd.supported_features
+    assert multi_notes is not None and "Multiple AP hardware models detected" in multi_notes
+    assert "Maintenance → Firmware" in multi_notes
+    assert "Watchdog &lt;reset&gt; `test`" in multi_notes
+
+    # chk is None (e.g. SSH mode): must NOT falsely claim cluster is up to date
+    orig_fw_check = coord.data.firmware_check
+    coord._firmware_info = orig_fw_info
+    coord.data = _replace_dc(coord.data, firmware_info=fw_info, firmware_check=None)
+    none_notes = await upd.async_release_notes()
+    assert none_notes is not None and "not been reported yet" in none_notes
+    assert "latest reported InstantOS build" not in none_notes
+
+    # Same/older version with non-empty image URL must NOT expose INSTALL
+    same_chk = _replace_dc(orig_fw_check, new_image_version="8.10.0.24_97188")  # type: ignore[arg-type]
+    coord.data = _replace_dc(coord.data, firmware_check=same_chk)
+    assert upd.state == "off"
+    assert UpdateEntityFeature.INSTALL not in upd.supported_features
+    with pytest.raises(Exception):
+        await upd.async_install(None, False)
+
+    coord.data = _replace_dc(coord.data, firmware_check=orig_fw_check)
 
     # 4. Write controls: button + switch, and auto-disable when turned off
     buttons: list[Any] = []

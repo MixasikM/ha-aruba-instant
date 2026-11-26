@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1] - 2026-11-26
+
+### Added
+- **Firmware update dialog details (`update.aruba_<cluster>_firmware`):** Enabled `UpdateEntityFeature.RELEASE_NOTES` and `release_summary` so clicking the cluster firmware entity in Home Assistant displays live active/available versions, backup partition firmware, AP hardware class(es), DRT version, last reboot cause, clear WebUI guidance, and a version-train `release_url` pointing directly to HPE's Instant Consolidated Release Notes Portal for AOS `8.6` / `8.10+` builds.
+
 ## [0.3.0] - 2026-11-26
 
 ### Added

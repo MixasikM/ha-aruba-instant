@@ -13,7 +13,7 @@ Local Wi-Fi presence detection and real-time access point telemetry for HPE Arub
 [![Open your Home Assistant instance and open a repository in the Marketplace.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=MixasikM&repository=ha-aruba-instant&category=integration)
 
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2026.11.0%2B-18BCF2.svg)](https://www.home-assistant.io/)
-[![Release](https://img.shields.io/badge/Version-0.3.0-blue.svg)](https://github.com/MixasikM/ha-aruba-instant/releases)
+[![Release](https://img.shields.io/badge/Version-0.3.1-blue.svg)](https://github.com/MixasikM/ha-aruba-instant/releases)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 > **Disclaimer:** This is an independent, unofficial community integration and is not affiliated with, endorsed by, or sponsored by Hewlett Packard Enterprise (HPE) or Aruba Networking. *Aruba*, *Aruba Instant*, *ArubaOS*, and related product names are trademarks of Hewlett Packard Enterprise Development LP. Use at your own risk.
@@ -106,7 +106,7 @@ All entities use a deterministic **`aruba_`** entity ID prefix (`device_tracker.
 - `sensor.aruba_<cluster>_total_clients` — Total active clients across the cluster/site
 - `sensor.aruba_<cluster>_master_ap` — Current Conductor / Master AP name *(Virtual Controller / Cluster mode only)*
 - `sensor.aruba_<cluster>_firmware` — Active primary firmware build with `backup_firmware`, `image_classes`, `model_version`, `last_reboot_cause`, `upgrade_in_progress`, and `drt_version` attributes *(Virtual Controller / Cluster mode only)*
-- `update.aruba_<cluster>_firmware` — Native HA update entity for cluster firmware (`on`, `off`, or `unknown` when offline / check unavailable) with live upgrade `in_progress` tracking *(Virtual Controller / Cluster mode only)*
+- `update.aruba_<cluster>_firmware` — Native HA update entity for cluster firmware (`on`, `off`, or `unknown` when offline / check unavailable) with live upgrade `in_progress` tracking, single-line `release_summary`, on-click `RELEASE_NOTES` firmware summary & upgrade guidance, and automatic InstantOS `8.6` / `8.10+` release-train `release_url` links *(Virtual Controller / Cluster mode only)*
 - `sensor.aruba_<cluster>_ssid_<ssid>_clients` — Active client count per discovered SSID
 - `switch.aruba_<cluster>_ssid_<ssid>_enabled` — Opt-in SSID broadcast toggle *(created only when **Enable AP & SSID write controls** is enabled)*
 

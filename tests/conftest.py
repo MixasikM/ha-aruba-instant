@@ -805,6 +805,9 @@ def _install_ha_stubs() -> None:
         RELEASE_NOTES = 16
 
     class UpdateEntity(_BaseEntity):
+        release_url: str | None = None
+        release_summary: str | None = None
+
         @property
         def state(self) -> str:
             installed = getattr(self, "installed_version", None)
