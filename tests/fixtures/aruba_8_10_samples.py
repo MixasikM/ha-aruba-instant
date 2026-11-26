@@ -222,6 +222,20 @@ Upgrade in process    :No
 UAP convert process   :No
 """
 
+SHOW_ALLOWED_APS_OUTPUT = """cli output: 
+
+COMMAND=show allowed-aps
+
+Allow New APs  :enable
+AP Allowlist
+------------
+MAC Address
+-----------
+02:00:00:10:00:01
+02:00:00:10:00:02
+02:00:00:10:00:03
+"""
+
 IMAGE_CHECK_ERROR_XML = (
     "<?xml version='1.0'?><re>"
     '<data name="Image Server State   " pn="true">error</data>'

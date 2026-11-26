@@ -261,6 +261,15 @@ def _enrich_node_with_snapshot(
         )
         updated[CONF_AP_ID] = matching.stable_id
         updated[CONF_AP_NAME] = matching.name
+        peers: list[str] = []
+        for raw_ip in (
+            *(ap.ip_address for ap in snapshot.access_points if ap.ip_address),
+            snapshot.summary.conductor_ip,
+        ):
+            if raw_ip and raw_ip not in ("-", "--") and raw_ip not in peers:
+                peers.append(raw_ip)
+        if peers:
+            updated["known_peers"] = peers
     else:
         updated[CONF_AP_ID] = updated.get(CONF_AP_ID) or updated[CONF_HOST]
         updated[CONF_AP_NAME] = snapshot.summary.name or updated[CONF_HOST]
@@ -539,8 +548,11 @@ class ArubaInstantConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._reset_queue("filters")
                 try:
                     snap, resolved = await self._async_probe_node(node)
-                except ArubaRestApiDisabledError:
-                    self._pending_rest_confirm_nodes = [node]
+                except ArubaRestApiDisabledError as exc:
+                    rest_node = dict(node)
+                    if exc.host:
+                        rest_node["_rest_enable_host"] = exc.host
+                    self._pending_rest_confirm_nodes = [rest_node]
                     return await self._async_advance_node_queue()
                 except ArubaAuthError:
                     errors["base"] = "invalid_auth"
@@ -607,7 +619,10 @@ class ArubaInstantConfigFlow(ConfigFlow, domain=DOMAIN):
                     if isinstance(res, asyncio.CancelledError):
                         raise res
                     if isinstance(res, ArubaRestApiDisabledError):
-                        self._pending_rest_confirm_nodes.append(node)
+                        rest_node = dict(node)
+                        if res.host:
+                            rest_node["_rest_enable_host"] = res.host
+                        self._pending_rest_confirm_nodes.append(rest_node)
                     elif isinstance(res, ArubaAuthError):
                         auth_failed_nodes.append(node)
                     elif isinstance(res, BaseException):
@@ -700,8 +715,11 @@ class ArubaInstantConfigFlow(ConfigFlow, domain=DOMAIN):
             )
             try:
                 snap, resolved = await self._async_probe_node(candidate)
-            except ArubaRestApiDisabledError:
-                self._pending_rest_confirm_nodes.append(candidate)
+            except ArubaRestApiDisabledError as exc:
+                rest_node = dict(candidate)
+                if exc.host:
+                    rest_node["_rest_enable_host"] = exc.host
+                self._pending_rest_confirm_nodes.append(rest_node)
                 return await self._async_advance_node_queue()
             except ArubaAuthError:
                 errors["base"] = "invalid_auth"
@@ -738,11 +756,12 @@ class ArubaInstantConfigFlow(ConfigFlow, domain=DOMAIN):
         assert self._current_rest_node is not None
         errors: dict[str, str] = {}
         node = dict(self._current_rest_node)
+        target_host = str(node.pop("_rest_enable_host", None) or node[CONF_HOST])
 
         if user_input is not None:
             action = str(user_input[CONF_CONFIRM_ACTION])
             ssh_client = ArubaSshClient(
-                host=node[CONF_HOST],
+                host=target_host,
                 username=node[CONF_USERNAME],
                 password=node[CONF_PASSWORD],
                 port=int(node.get(CONF_SSH_PORT, DEFAULT_SSH_PORT)),
@@ -756,12 +775,13 @@ class ArubaInstantConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
                 rest_client = ArubaRestClient(
                     session=session,
-                    host=node[CONF_HOST],
+                    host=target_host,
                     username=node[CONF_USERNAME],
                     password=node[CONF_PASSWORD],
                     port=int(node.get(CONF_REST_PORT, DEFAULT_REST_PORT)),
                     verify_ssl=bool(node.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)),
                 )
+                rest_client.set_known_peer_ips([node[CONF_HOST], target_host])
                 try:
                     await ssh_client.async_enable_rest_api()
                     # Brief retry in case AP REST daemon takes ~1s to bind :4343 after write memory
@@ -825,7 +845,7 @@ class ArubaInstantConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="confirm_enable_rest",
             data_schema=schema,
             errors=errors,
-            description_placeholders={"host": node[CONF_HOST]},
+            description_placeholders={"host": target_host},
         )
 
     async def async_step_filters(
@@ -867,16 +887,33 @@ class ArubaInstantConfigFlow(ConfigFlow, domain=DOMAIN):
         nodes = [dict(n) for n in entry.data.get(CONF_NODES, [])]
         errors: dict[str, str] = {}
 
-        default_host = (
-            self._reauth_failed_hosts[0]
-            if self._reauth_failed_hosts
-            else (nodes[0][CONF_HOST] if nodes else "")
-        )
         all_hosts = [str(n[CONF_HOST]) for n in nodes]
+        mapped_failed: list[str] = []
+        for raw_fail in self._reauth_failed_hosts:
+            owner = next(
+                (str(n[CONF_HOST]) for n in nodes if n[CONF_HOST] == raw_fail),
+                None,
+            )
+            if owner is None:
+                owner = next(
+                    (
+                        str(n[CONF_HOST])
+                        for n in nodes
+                        if raw_fail in (n.get("known_peers") or ())
+                    ),
+                    None,
+                )
+            mapped_host = owner or (all_hosts[0] if len(nodes) == 1 else None)
+            if mapped_host and mapped_host in all_hosts and mapped_host not in mapped_failed:
+                mapped_failed.append(mapped_host)
+
+        default_host = mapped_failed[0] if mapped_failed else (all_hosts[0] if all_hosts else "")
 
         selected_host = str(
             (user_input or {}).get(CONF_TARGET_HOST) or default_host
         )
+        if selected_host not in all_hosts and all_hosts:
+            selected_host = default_host
         selected_user = (user_input or {}).get(CONF_USERNAME)
         selected_apply_all = bool((user_input or {}).get(CONF_APPLY_TO_ALL_NODES, False))
 
@@ -889,7 +926,7 @@ class ArubaInstantConfigFlow(ConfigFlow, domain=DOMAIN):
             probes: list[tuple[int, dict[str, Any]]] = []
             for i, node in enumerate(nodes):
                 new_node = dict(node)
-                if selected_apply_all or node[CONF_HOST] == target_host:
+                if len(nodes) == 1 or selected_apply_all or node[CONF_HOST] == target_host:
                     new_node[CONF_USERNAME] = username
                     new_node[CONF_PASSWORD] = password
                     probes.append((i, new_node))
@@ -909,9 +946,15 @@ class ArubaInstantConfigFlow(ConfigFlow, domain=DOMAIN):
                 _LOGGER.exception("Unexpected reauth error for %s", target_host)
                 errors["base"] = "unknown"
             else:
-                if not selected_apply_all:
+                if not selected_apply_all and len(nodes) > 1:
                     self._reauth_failed_hosts = [
-                        h for h in self._reauth_failed_hosts if h != target_host
+                        h
+                        for h in self._reauth_failed_hosts
+                        if h != target_host
+                        and not any(
+                            n[CONF_HOST] == target_host and h in (n.get("known_peers") or ())
+                            for n in nodes
+                        )
                     ]
                 else:
                     self._reauth_failed_hosts = []
@@ -997,8 +1040,11 @@ class ArubaInstantConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._reset_queue("finish_reconfigure_cluster")
                 try:
                     snap, resolved = await self._async_probe_node(node)
-                except ArubaRestApiDisabledError:
-                    self._pending_rest_confirm_nodes = [node]
+                except ArubaRestApiDisabledError as exc:
+                    rest_node = dict(node)
+                    if exc.host:
+                        rest_node["_rest_enable_host"] = exc.host
+                    self._pending_rest_confirm_nodes = [rest_node]
                     return await self._async_advance_node_queue()
                 except ArubaAuthError:
                     errors["base"] = "invalid_auth"
@@ -1048,8 +1094,11 @@ class ArubaInstantConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._editing_node_index = None
                 try:
                     snap, resolved = await self._async_probe_node(node)
-                except ArubaRestApiDisabledError:
-                    self._pending_rest_confirm_nodes = [node]
+                except ArubaRestApiDisabledError as exc:
+                    rest_node = dict(node)
+                    if exc.host:
+                        rest_node["_rest_enable_host"] = exc.host
+                    self._pending_rest_confirm_nodes = [rest_node]
                     return await self._async_advance_node_queue()
                 except ArubaAuthError:
                     errors["base"] = "invalid_auth"
@@ -1118,8 +1167,11 @@ class ArubaInstantConfigFlow(ConfigFlow, domain=DOMAIN):
                 self._editing_node_index = idx
                 try:
                     snap, resolved = await self._async_probe_node(node)
-                except ArubaRestApiDisabledError:
-                    self._pending_rest_confirm_nodes = [node]
+                except ArubaRestApiDisabledError as exc:
+                    rest_node = dict(node)
+                    if exc.host:
+                        rest_node["_rest_enable_host"] = exc.host
+                    self._pending_rest_confirm_nodes = [rest_node]
                     return await self._async_advance_node_queue()
                 except ArubaAuthError:
                     errors["base"] = "invalid_auth"

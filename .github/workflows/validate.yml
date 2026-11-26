@@ -34,6 +34,8 @@ jobs:
       - uses: home-assistant/actions/hassfest@master
 
   hacs:
+    needs: [release-zip]
+    if: always() && (needs.release-zip.result == 'success' || needs.release-zip.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -48,10 +50,12 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name }}
       - name: Build aruba_instant.zip release asset
         run: |
           cd custom_components/aruba_instant
-          zip -r ../../aruba_instant.zip . -x '*/__pycache__/*' '*.pyc'
+          zip -r ../../aruba_instant.zip . -x '*__pycache__*' '*.pyc' '*.pyo'
       - name: Upload aruba_instant.zip to release
         env:
           GH_TOKEN: ${{ github.token }}

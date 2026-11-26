@@ -405,6 +405,9 @@
       "channel_6ghz": {
         "name": "Kanal 6 GHz"
       },
+      "ap_ip_address": {
+        "name": "IP-Adresse"
+      },
       "ap_firmware": {
         "name": "Firmware",
         "state_attributes": {
@@ -620,6 +623,12 @@
     },
     "config_entry_required": {
       "message": "Mehrere Aruba-Instant-Einträge konfiguriert; bitte config_entry_id angeben."
+    }
+  },
+  "issues": {
+    "vc_vip_unreachable": {
+      "title": "Dedizierte Cluster-IP {vc_ip} ist nicht erreichbar ({site_name})",
+      "description": "Der Aruba-Cluster {site_name} meldet eine dedizierte Virtual-Controller-IP ({vc_ip}), die von Home Assistant jedoch nicht erreicht werden kann (z. B. aufgrund von VLAN-, Subnetz- oder Firewall-Einstellungen). Die Abfrage läuft normal über den aktiven Master-Access-Point ({conductor_ip}) weiter, und Home Assistant prüft {vc_ip} regelmäßig im Hintergrund."
     }
   }
 }

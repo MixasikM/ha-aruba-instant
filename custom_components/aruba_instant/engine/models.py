@@ -74,6 +74,7 @@ class FirmwareImageInfo:
     upgrade_in_progress: bool = False
     auto_reboot: bool | None = None
     ap_statuses: tuple[ApUpgradeEntry, ...] = ()
+    allowed_ap_macs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

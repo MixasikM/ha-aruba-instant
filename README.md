@@ -13,7 +13,7 @@ Local Wi-Fi presence detection and real-time access point telemetry for HPE Arub
 [![Open your Home Assistant instance and open a repository in the Marketplace.](https://my.home-assistant.io/badges/marketplace_repository.svg)](https://my.home-assistant.io/redirect/marketplace_repository/?owner=MixasikM&repository=ha-aruba-instant&category=integration)
 
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2026.11.0%2B-18BCF2.svg)](https://www.home-assistant.io/)
-[![Release](https://img.shields.io/badge/Version-0.2.0-blue.svg)](https://github.com/MixasikM/ha-aruba-instant/releases)
+[![Release](https://img.shields.io/badge/Version-0.3.0-blue.svg)](https://github.com/MixasikM/ha-aruba-instant/releases)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
 > **Disclaimer:** This is an independent, unofficial community integration and is not affiliated with, endorsed by, or sponsored by Hewlett Packard Enterprise (HPE) or Aruba Networking. *Aruba*, *Aruba Instant*, *ArubaOS*, and related product names are trademarks of Hewlett Packard Enterprise Development LP. Use at your own risk.
@@ -24,7 +24,8 @@ Local Wi-Fi presence detection and real-time access point telemetry for HPE Arub
 
 - **Fast local presence & clean startup restoration:** Tracks Wi-Fi clients locally with configurable `consider_home` hysteresis (`180s` default) to absorb brief phone Wi-Fi sleep, and restores offline trackers from the Entity Registry at startup as `not_home` rather than `unavailable`.
 - **Transient-fault resilience:** Tolerates up to 2 consecutive transient poll failures during brief controller failovers without flashing entities `unavailable`.
-- **Flexible deployment topologies:** Supports **Virtual Controller clusters**, **single standalone APs**, and **Multi-AP `AOS 8` / `AOS 10` pools** (including per-AP credentials, mixed REST/SSH nodes, and day-2 **Reconfigure** without losing `person.*` links).
+- **Flexible deployment topologies & automatic controller failover:** Supports **Virtual Controller clusters**, **single standalone APs**, and **Multi-AP `AOS 8` / `AOS 10` pools**. Even if you enter the IP address of an ordinary member AP instead of a shared cluster IP, Home Assistant discovers the whole cluster, uses the shared cluster IP when reachable (or follows whichever AP is currently leading the cluster if the shared IP is unreachable), and switches over seamlessly if leadership moves to another AP.
+- **Offline Access Point awareness:** Unplugged APs still present in your cluster's allowed AP list stay cleanly visible as **Offline** (`off`) with their last known IP address—even across Home Assistant restarts—while APs you permanently remove from the cluster allowlist are cleaned up automatically.
 - **Smart client & SSID filtering:** Pre-fills **Tracked SSIDs** from your APs and filters by **Minimum SNR**, **Require assigned IPv4 address**, **Excluded MAC addresses**, unnamed clients, and **Include wired AP downlink clients** so IoT clutter never floods `device_tracker`.
 - **Cluster, SSID & per-AP telemetry:** Exposes cluster-wide client counts, active Conductor / Master AP (both hub and per-AP `binary_sensor.aruba_<ap>_conductor`), per-SSID client counts, AP connectivity and hardware identity, per-AP client counts, `2.4 / 5 / 6 GHz` channel utilization and recorded radio channel history (`sensor.aruba_<ap>_*_channel`), AP boot timestamp (`Last restart`) with reboot cause, plus low-cadence firmware, backup partition, DRT, and native `UpdateEntity` diagnostics.
 - **Recorder-friendly live roaming attributes & safe cleanup:** Publishes `essid`, `access_point`, `band`, `channel`, `phy_type`, `signal`, `speed_mbps`, `os`, `role`, and `ipv6` while keeping `signal` and `speed_mbps` live in the UI and excluded from Recorder history (`_unrecorded_attributes`), plus opt-in per-client roaming sensors and `person.*`-safe stale client cleanup (`aruba_instant.purge_stale_clients`).
@@ -112,6 +113,7 @@ All entities use a deterministic **`aruba_`** entity ID prefix (`device_tracker.
 ### Access Point Devices (`Aruba <AP>`)
 - `binary_sensor.aruba_<ap>_online` — Reachability / online status in the cluster or Multi-AP pool (`ip_address`, `mac_address`, `serial_number`, `model`, `ap_class`, `is_conductor` attributes)
 - `binary_sensor.aruba_<ap>_conductor` — Diagnostic indicator showing whether this AP currently holds the Conductor / Master role
+- `sensor.aruba_<ap>_ip_address` — AP management IPv4/IPv6 address *(diagnostic; retained when an AP temporarily goes offline)*
 - `sensor.aruba_<ap>_clients` — Connected clients on this AP
 - `sensor.aruba_<ap>_5ghz_utilization` — 5 GHz channel utilization (`%`)
 - `sensor.aruba_<ap>_2_4ghz_utilization` — 2.4 GHz channel utilization (`%`)
@@ -147,6 +149,7 @@ All entities use a deterministic **`aruba_`** entity ID prefix (`device_tracker.
 - **Phones flapping `not_home` during brief Wi-Fi sleep:** Increase **Consider home duration (seconds)** in **Configure** (e.g., `240`–`300` seconds; default is `180`). Conversely, decrease to `60` or `0` if Aruba's AP aging already provides enough buffer.
 - **Older InstantOS 6.x / early 8.x SSH handshake errors:** Enable **Legacy SSH algorithm fallback** in **Advanced network settings** (`Auto` / `SSH` also retries SHA-1 KEX negotiation automatically).
 - **Changed password on one AP in a Multi-AP pool:** Use the integration's **Reauth** flow to update credentials only for the failing AP (or apply across all nodes) without removing entities or breaking `person.*` links.
+- **How cluster failover works without a dedicated Virtual Controller IP:** You don't have to guess which AP is currently in charge. Point the integration at any AP in the cluster—on the first check it finds the active cluster leader, learns the addresses of every other AP in the cluster, and saves them locally. If your cluster has a working shared Virtual Controller IP, it upgrades to that shared IP automatically; if that shared IP is unreachable across your VLANs or firewall, polling continues directly through the active leader, periodically re-checks the shared IP in the background, raises a non-blocking notice in **Settings -> System -> Repairs** after repeated failures, and clears the warning automatically as soon as the shared IP becomes reachable again.
 
 ---
 

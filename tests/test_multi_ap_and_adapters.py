@@ -47,9 +47,15 @@ from tests.fixtures.aruba_8_10_samples import (
 
 
 class _FakeResponse:
-    def __init__(self, status: int, body: Any) -> None:
+    def __init__(
+        self,
+        status: int,
+        body: Any,
+        headers: dict[str, str] | None = None,
+    ) -> None:
         self.status = status
         self._body = body
+        self.headers = headers or {}
 
     async def __aenter__(self) -> _FakeResponse:
         return self
@@ -450,7 +456,10 @@ async def test_rest_and_ssh_firmware_and_write_controls(monkeypatch: pytest.Monk
         async def wait_closed(self) -> None:
             return None
 
-    async def fake_connect(**_kw: Any) -> _RebootConn:
+    dialed_hosts: list[str] = []
+
+    async def fake_connect(**kwargs: Any) -> _RebootConn:
+        dialed_hosts.append(str(kwargs.get("host", "")))
         return _RebootConn()
 
     monkeypatch.setattr(asyncssh, "connect", fake_connect)
@@ -460,6 +469,14 @@ async def test_rest_and_ssh_firmware_and_write_controls(monkeypatch: pytest.Monk
         await ssh.async_reboot_ap("198.51.100.22")
     await ssh.async_reboot_ap("198.51.100.21")
     assert written == ["reload\n", "y\n"]
+    assert dialed_hosts[-1] == "ap-standalone.example.test"
+
+    # Rebooting a known peer AP dials that peer directly even when _active_host is another AP
+    ssh_cluster = ArubaSshClient("198.51.100.21", "admin", "pw")
+    ssh_cluster._active_host = "198.51.100.22"
+    ssh_cluster.set_known_peer_ips(["198.51.100.21", "198.51.100.22"])
+    await ssh_cluster.async_reboot_ap("198.51.100.21")
+    assert dialed_hosts[-1] == "198.51.100.21"
 
     # MultiApClusterClient reboot routes only to matching node
     called: list[str] = []
@@ -485,3 +502,91 @@ async def test_rest_and_ssh_firmware_and_write_controls(monkeypatch: pytest.Monk
     )
     await pool.async_reboot_ap("198.51.100.32")
     assert called == ["n2:198.51.100.32"]
+
+
+async def test_rest_member_ap_discovery_and_master_failover() -> None:
+    """Connecting to a non-Master AP adopts reachable VC VIP or falls back seamlessly to Master."""
+    import aiohttp
+
+    master_alive = True
+    vip_alive = False
+
+    class _FailoverSession:
+        def post(self, url: str, **kwargs: Any) -> _FakeResponse:
+            if "192.0.2.10:" in url and not vip_alive:
+                raise aiohttp.ClientError("192.0.2.10 unreachable VLAN VIP")
+            if "192.0.2.12:" in url and "/rest/login" in url:
+                return _FakeResponse(
+                    503,
+                    "<HTML>\n<HEAD><TITLE>503 Service Unavailable</TITLE></HEAD>\n"
+                    '<BODY BGCOLOR="#cc9999" TEXT="#000000" LINK="#2020ff" VLINK="#4040cc">\n'
+                    "<H4>503 Service Unavailable</H4>\n"
+                    "REST API service is available only on Master IAP\n"
+                    "</BODY>\n</HTML>",
+                )
+            if "192.0.2.11:" in url and not master_alive:
+                raise aiohttp.ClientError("192.0.2.11 down")
+            return _FakeResponse(200, REST_LOGIN_SUCCESS_JSON)
+
+        def get(self, url: str, **kwargs: Any) -> _FakeResponse:
+            if "192.0.2.10" in url and not vip_alive:
+                raise aiohttp.ClientError("192.0.2.10 unreachable VLAN VIP")
+            if "192.0.2.12" in url and "/rest/" not in url:
+                target = "https://192.0.2.11:4343/" if master_alive else "https://192.0.2.13:4343/"
+                return _FakeResponse(302, "", headers={"Location": target})
+            if "192.0.2.11:" in url and not master_alive:
+                raise aiohttp.ClientError("192.0.2.11 down")
+            cmd = (kwargs.get("params") or {}).get("cmd", "")
+            if cmd == "show summary":
+                out = SHOW_SUMMARY_OUTPUT if master_alive else SHOW_SUMMARY_OUTPUT.replace("192.0.2.11", "192.0.2.13")
+                return _FakeResponse(200, {"Command output": out})
+            if cmd == "show network":
+                return _FakeResponse(200, {"Command output": SHOW_NETWORK_OUTPUT})
+            if cmd == "show aps":
+                return _FakeResponse(200, {"Command output": SHOW_APS_OUTPUT})
+            if cmd == "show clients":
+                return _FakeResponse(200, {"Command output": SHOW_CLIENTS_OUTPUT})
+            return _FakeResponse(404, "")
+
+    client = ArubaRestClient(_FailoverSession(), "192.0.2.12", "admin", "pw")  # type: ignore[arg-type]
+    snap1 = await client.async_fetch_snapshot()
+    # Non-destructively probes VC VIP 192.0.2.10 on poll #1; keeps Master 192.0.2.11 when VIP fails
+    assert client.active_host == "192.0.2.11"
+    assert snap1.summary.conductor_ip == "192.0.2.11"
+    assert "192.0.2.10" in client._unusable_vc_ips
+    assert client.get_vc_vip_failure_count("192.0.2.10") == 1
+    peers = client.get_known_peer_ips()
+    assert "192.0.2.11" in peers
+    assert "192.0.2.12" in peers
+    assert "192.0.2.13" in peers
+
+    # Cooldown ticks down without re-probing; when cooldown expires, second failure increments count to 2
+    client._vc_vip_cooldown["192.0.2.10"] = 1
+    await client.async_fetch_snapshot()
+    assert client.active_host == "192.0.2.11"
+    assert client.get_vc_vip_failure_count("192.0.2.10") == 2
+
+    # When cooldown expires and VIP becomes reachable again, client promotes back and clears failure counter
+    vip_alive = True
+    client._vc_vip_cooldown["192.0.2.10"] = 1
+    await client.async_fetch_snapshot()
+    assert client.active_host == "192.0.2.10"
+    assert client.get_vc_vip_failure_count("192.0.2.10") == 0
+
+    # Reset VIP unreachable state to verify peer-driven Master AP failover when Master 192.0.2.11 goes down
+    vip_alive = False
+    await client.async_fetch_snapshot()
+    assert client.active_host == "192.0.2.11"
+
+    # Poll #5+: Simulate Master 192.0.2.11 going down; fails over via peer 192.0.2.12 -> Master 192.0.2.13
+    master_alive = False
+    snap2 = await client.async_fetch_snapshot()
+    assert client.active_host == "192.0.2.13"
+    assert snap2.summary.conductor_ip == "192.0.2.13"
+
+    # Verify reachable VC VIP case promotes immediately on poll #1 and logs out old session
+    vip_alive = True
+    vip_client = ArubaRestClient(_FailoverSession(), "192.0.2.12", "admin", "pw")  # type: ignore[arg-type]
+    await vip_client.async_fetch_snapshot()
+    assert vip_client.active_host == "192.0.2.10"
+    assert vip_client.get_vc_vip_failure_count("192.0.2.10") == 0

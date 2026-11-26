@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-11-26
+
+### Added
+- **Smart Virtual Controller VIP & Member AP automatic failover:** Connect to any AP in an Aruba Instant cluster (including non-Master member APs returning HTTP `503`); Home Assistant automatically discovers the active Conductor / Master AP via HTTP/HTTPS redirect probing, learns all sibling cluster AP IPs into persistent storage, and fails over seamlessly across surviving peers when leadership changes or an AP reboots.
+- **Dedicated Virtual Controller IP promotion, background re-probe & Repairs warning:** Automatically promotes to the cluster's configured `VC IP Address` when reachable, falls back cleanly to the Master AP's physical IP if the VIP is unreachable across VLANs or firewalls, periodically re-probes the VIP every 20 polls to resume it once connectivity is restored, and surfaces an auto-clearing **Repairs** warning (`vc_vip_unreachable`) in Home Assistant after repeated failures.
+- **Per-AP diagnostic IP address sensor (`sensor.aruba_<ap>_ip_address`):** Exposes each AP's current management IP address on its device card in English, German, and Russian, retaining the last known IP while an AP is offline.
+- **Offline & decommissioned AP lifecycle (`show allowed-aps`):** Cross-references the cluster's `AP Allowlist` so temporarily unplugged APs remain visible as `Offline` (`off`) across restarts, while APs permanently removed from the cluster allowlist are pruned cleanly from Home Assistant's Device Registry and cache.
+
+### Changed
+- Added automatic cleanup of persisted `.storage/aruba_instant.<entry_id>.clients` data on integration removal (`async_remove_entry`).
+- Enabled HACS `zip_release` packaging (`aruba_instant.zip`) in `hacs.json` and the GitHub Actions release workflow.
+
 ## [0.2.0] - 2026-11-24
 
 ### Added

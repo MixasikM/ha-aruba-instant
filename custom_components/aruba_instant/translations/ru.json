@@ -405,6 +405,9 @@
       "channel_6ghz": {
         "name": "Канал 6 ГГц"
       },
+      "ap_ip_address": {
+        "name": "IP-адрес"
+      },
       "ap_firmware": {
         "name": "Прошивка",
         "state_attributes": {
@@ -620,6 +623,12 @@
     },
     "config_entry_required": {
       "message": "Настроено несколько хабов Aruba Instant; укажите config_entry_id."
+    }
+  },
+  "issues": {
+    "vc_vip_unreachable": {
+      "title": "Выделенный IP-адрес кластера {vc_ip} недоступен ({site_name})",
+      "description": "Кластер Aruba {site_name} сообщает выделенный IP-адрес виртуального контроллера ({vc_ip}), но Home Assistant не может к нему подключиться (например, из-за настроек VLAN, маршрутизации или межсетевого экрана). Опрос продолжает штатно работать через собственный IP-адрес ведущей точки доступа ({conductor_ip}), а Home Assistant будет периодически проверять доступность {vc_ip} в фоновом режиме."
     }
   }
 }

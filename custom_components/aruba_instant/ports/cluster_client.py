@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 
 from ..engine.models import ClusterSnapshot, FirmwareCheckResult, FirmwareImageInfo
 
@@ -75,3 +76,20 @@ class BaseArubaClusterClient(ABC):
     ) -> None:
         """Trigger firmware upgrade from an explicit HTTP/HTTPS image URL."""
         raise ArubaReadOnlyCliError("Firmware upgrade is not supported by this transport client")
+
+    @property
+    def active_host(self) -> str | None:
+        """Return currently targeted AP/controller host IP if tracked."""
+        return None
+
+    def set_known_peer_ips(self, peer_ips: Iterable[str]) -> None:
+        """Seed known peer AP management IPs for failover without dedicated VIP."""
+        return None
+
+    def get_known_peer_ips(self) -> list[str]:
+        """Return known peer AP management IPs discovered for this cluster."""
+        return []
+
+    def get_vc_vip_failure_count(self, vc_ip: str) -> int:
+        """Return consecutive connection failure count for an advertised VC VIP."""
+        return 0

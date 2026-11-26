@@ -23,6 +23,7 @@ from custom_components.aruba_instant.engine.parsers import (
     build_snapshot,
     classify_band,
     enrich_snapshot_with_firmware,
+    parse_allowed_aps,
     parse_aps,
     parse_clients,
     parse_image_check_xml,
@@ -331,6 +332,16 @@ DisabledNet       DisabledNet       0        guest     2.4ghz,5ghz  Disabled
     dnets = parse_networks(disabled_net)
     assert len(dnets) == 1
     assert dnets[0].active is False
+
+    from tests.fixtures.aruba_8_10_samples import SHOW_ALLOWED_APS_OUTPUT
+
+    allowed = parse_allowed_aps(SHOW_ALLOWED_APS_OUTPUT)
+    assert allowed == ("02:00:00:10:00:01", "02:00:00:10:00:02", "02:00:00:10:00:03")
+    assert parse_allowed_aps("COMMAND=show allowed-aps\n% Parse error.\n") == ()
+    fw_with_allow = build_firmware_info(
+        SHOW_IMAGE_VERSION_OUTPUT, SHOW_VERSION_OUTPUT, SHOW_UPGRADE_INFO_OUTPUT, SHOW_ALLOWED_APS_OUTPUT
+    )
+    assert fw_with_allow.allowed_ap_macs == allowed
     assert err_chk.new_drt_version == "1.0_97611"
 
     ok_empty_chk = parse_image_check_xml(IMAGE_CHECK_SUCCESS_EMPTY_XML)

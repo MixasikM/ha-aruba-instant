@@ -4,10 +4,10 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterable
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
-
-from dataclasses import replace
 
 import aiohttp
 
@@ -57,14 +57,41 @@ class AutoTransportClient(BaseArubaClusterClient):
             return "ssh"
         return None
 
+    @property
+    def active_host(self) -> str | None:
+        """Return currently targeted host on the active transport."""
+        return (self._active_client or self._rest_client).active_host
+
+    def set_known_peer_ips(self, peer_ips: Iterable[str]) -> None:
+        """Seed discovered peer AP IPs on both REST and SSH adapters."""
+        ips = list(peer_ips)
+        self._rest_client.set_known_peer_ips(ips)
+        self._ssh_client.set_known_peer_ips(ips)
+
+    def get_known_peer_ips(self) -> list[str]:
+        """Return merged list of discovered peer AP IPs from both transports."""
+        merged: list[str] = []
+        for ip_addr in (*self._rest_client.get_known_peer_ips(), *self._ssh_client.get_known_peer_ips()):
+            if ip_addr not in merged:
+                merged.append(ip_addr)
+        return merged
+
+    def get_vc_vip_failure_count(self, vc_ip: str) -> int:
+        """Return consecutive VC VIP failure count from the active transport."""
+        return self._preferred_client().get_vc_vip_failure_count(vc_ip)
+
     async def async_fetch_snapshot(self) -> ClusterSnapshot:
         """Fetch snapshot via REST first; fall back to SSH appropriately."""
         if self._rest_disabled_permanently:
-            return await self._ssh_client.async_fetch_snapshot()
+            snap = await self._ssh_client.async_fetch_snapshot()
+            self._rest_client.set_known_peer_ips(self._ssh_client.get_known_peer_ips())
+            return snap
 
         if self._ssh_cooldown_remaining > 0:
             self._ssh_cooldown_remaining -= 1
-            return await self._ssh_client.async_fetch_snapshot()
+            snap = await self._ssh_client.async_fetch_snapshot()
+            self._rest_client.set_known_peer_ips(self._ssh_client.get_known_peer_ips())
+            return snap
 
         try:
             snap = await self._rest_client.async_fetch_snapshot()
@@ -75,15 +102,18 @@ class AutoTransportClient(BaseArubaClusterClient):
             snap = await self._ssh_client.async_fetch_snapshot()
             self._active_client = self._ssh_client
             self._rest_disabled_permanently = True
+            self._rest_client.set_known_peer_ips(self._ssh_client.get_known_peer_ips())
             return snap
         except ArubaConnectionError:
             await self._rest_client.async_close()
             snap = await self._ssh_client.async_fetch_snapshot()
             # Re-probe fast REST after cooldown in case 503/reboot was transient
             self._ssh_cooldown_remaining = _TRANSIENT_SSH_FALLBACK_POLLS
+            self._rest_client.set_known_peer_ips(self._ssh_client.get_known_peer_ips())
             return snap
 
         self._active_client = self._rest_client
+        self._ssh_client.set_known_peer_ips(self._rest_client.get_known_peer_ips())
         return snap
 
     async def async_close(self) -> None:
@@ -193,14 +223,19 @@ def build_node_client(
         legacy_ssh=legacy_ssh,
     )
     if transport == "rest":
-        return rest_client
-    if transport == "ssh":
-        return ssh_client
-    return AutoTransportClient(
-        rest_client=rest_client,
-        ssh_client=ssh_client,
-        fallback_on_rest_disabled=fallback_on_rest_disabled,
-    )
+        chosen: BaseArubaClusterClient = rest_client
+    elif transport == "ssh":
+        chosen = ssh_client
+    else:
+        chosen = AutoTransportClient(
+            rest_client=rest_client,
+            ssh_client=ssh_client,
+            fallback_on_rest_disabled=fallback_on_rest_disabled,
+        )
+    if known_peers := node.get("known_peers"):
+        if isinstance(known_peers, (list, tuple, set)):
+            chosen.set_known_peer_ips(str(p) for p in known_peers)
+    return chosen
 
 
 class MultiApClusterClient(BaseArubaClusterClient):

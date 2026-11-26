@@ -868,7 +868,41 @@ def _install_ha_stubs() -> None:
         def async_delay_save(self, data_func: Callable[[], Any], delay: float = 0) -> None:
             self.hass.data.setdefault("_stores", {})[self.key] = data_func()
 
+        async def async_remove(self) -> None:
+            self.hass.data.setdefault("_stores", {}).pop(self.key, None)
+
     storage_mod.Store = Store  # type: ignore[attr-defined]
+
+    ir_mod = types.ModuleType("homeassistant.helpers.issue_registry")
+
+    class IssueSeverity(str, Enum):
+        WARNING = "warning"
+        ERROR = "error"
+        CRITICAL = "critical"
+
+    def async_create_issue(
+        hass: HomeAssistant,
+        domain: str,
+        issue_id: str,
+        **kwargs: Any,
+    ) -> None:
+        hass.data.setdefault("_issues", {})[(domain, issue_id)] = {
+            "domain": domain,
+            "issue_id": issue_id,
+            **kwargs,
+        }
+
+    def async_delete_issue(
+        hass: HomeAssistant,
+        domain: str,
+        issue_id: str,
+    ) -> None:
+        hass.data.setdefault("_issues", {}).pop((domain, issue_id), None)
+
+    ir_mod.IssueSeverity = IssueSeverity  # type: ignore[attr-defined]
+    ir_mod.async_create_issue = async_create_issue  # type: ignore[attr-defined]
+    ir_mod.async_delete_issue = async_delete_issue  # type: ignore[attr-defined]
+    helpers_mod.issue_registry = ir_mod  # type: ignore[attr-defined]
 
     diag_comp = types.ModuleType("homeassistant.components.diagnostics")
     REDACTED = "**REDACTED**"
@@ -907,6 +941,7 @@ def _install_ha_stubs() -> None:
             "homeassistant.helpers.device_registry": dr_mod,
             "homeassistant.helpers.entity_registry": er_mod,
             "homeassistant.helpers.entity_platform": ep_mod,
+            "homeassistant.helpers.issue_registry": ir_mod,
             "homeassistant.helpers.selector": sel_mod,
             "homeassistant.helpers.storage": storage_mod,
             "homeassistant.helpers.typing": typing_mod,

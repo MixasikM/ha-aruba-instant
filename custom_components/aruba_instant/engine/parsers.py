@@ -739,15 +739,39 @@ def parse_upgrade_info(raw: str) -> tuple[bool, bool | None, tuple[ApUpgradeEntr
     return upgrade_in_progress, auto_reboot, tuple(ap_entries)
 
 
+def parse_allowed_aps(raw: str) -> tuple[str, ...]:
+    """Parse normalized wired AP MAC addresses from `show allowed-aps`."""
+    cleaned = strip_cli_envelope(raw)
+    if not cleaned:
+        return ()
+    lower = cleaned.lower()
+    if "% parse error" in lower or "invalid input" in lower or "incomplete command" in lower:
+        return ()
+    macs: list[str] = []
+    seen: set[str] = set()
+    for line in cleaned.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if re.fullmatch(r"(?:[0-9a-fA-F]{2}[:\-]){5}[0-9a-fA-F]{2}", stripped):
+            norm = normalize_mac(stripped)
+            if norm not in seen:
+                seen.add(norm)
+                macs.append(norm)
+    return tuple(macs)
+
+
 def build_firmware_info(
     image_version_raw: str,
     version_raw: str,
     upgrade_info_raw: str,
+    allowed_aps_raw: str = "",
 ) -> FirmwareImageInfo:
-    """Combine `show image version`, `show version`, and `show upgrade info` outputs."""
+    """Combine `show image version`, `show version`, `show upgrade info`, and `show allowed-aps`."""
     img = parse_image_version(image_version_raw)
     model_version_line, last_reboot_cause = parse_version_details(version_raw)
     upgrade_in_progress, auto_reboot, ap_statuses = parse_upgrade_info(upgrade_info_raw)
+    allowed_ap_macs = parse_allowed_aps(allowed_aps_raw)
     classes = list(img.image_classes)
     for entry in ap_statuses:
         if entry.ap_class and entry.ap_class not in classes:
@@ -763,6 +787,7 @@ def build_firmware_info(
         upgrade_in_progress=upgrade_in_progress,
         auto_reboot=auto_reboot,
         ap_statuses=ap_statuses,
+        allowed_ap_macs=allowed_ap_macs,
     )
 
 

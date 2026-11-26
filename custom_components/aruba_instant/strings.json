@@ -405,6 +405,9 @@
       "channel_6ghz": {
         "name": "6 GHz channel"
       },
+      "ap_ip_address": {
+        "name": "IP address"
+      },
       "ap_firmware": {
         "name": "Firmware",
         "state_attributes": {
@@ -620,6 +623,12 @@
     },
     "config_entry_required": {
       "message": "Multiple Aruba Instant entries are configured; specify config_entry_id."
+    }
+  },
+  "issues": {
+    "vc_vip_unreachable": {
+      "title": "Dedicated cluster IP {vc_ip} is unreachable ({site_name})",
+      "description": "Aruba cluster {site_name} advertises a dedicated Virtual Controller IP ({vc_ip}), but Home Assistant cannot reach it (for example due to VLAN, subnet, or firewall settings). Polling continues normally through the active Master access point ({conductor_ip}), and Home Assistant will periodically re-check {vc_ip} in the background."
     }
   }
 }

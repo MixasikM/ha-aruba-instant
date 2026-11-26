@@ -6,8 +6,14 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import config_validation as cv, device_registry as dr, entity_registry as er
+from homeassistant.helpers import (
+    config_validation as cv,
+    device_registry as dr,
+    entity_registry as er,
+    issue_registry as ir,
+)
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 
 from .adapters.multi_ap_client import MultiApClusterClient, build_node_client
@@ -159,7 +165,18 @@ async def async_unload_entry(
     runtime_data = getattr(entry, "runtime_data", None)
     if runtime_data is not None and runtime_data.coordinator is not None:
         await runtime_data.coordinator.async_flush_client_store()
+    ir.async_delete_issue(hass, DOMAIN, f"vc_vip_unreachable_{entry.entry_id}")
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+
+
+async def async_remove_entry(
+    hass: HomeAssistant,
+    entry: ArubaInstantConfigEntry,
+) -> None:
+    """Remove persisted client/cluster Store file when config entry is deleted."""
+    ir.async_delete_issue(hass, DOMAIN, f"vc_vip_unreachable_{entry.entry_id}")
+    store = Store[dict[str, Any]](hass, version=1, key=f"{DOMAIN}.{entry.entry_id}.clients")
+    await store.async_remove()
 
 
 async def async_remove_config_entry_device(
@@ -186,5 +203,16 @@ async def async_remove_config_entry_device(
         for conn_type, conn_val in device_entry.connections:
             if conn_type == dr.CONNECTION_NETWORK_MAC and normalize_mac(conn_val) in active_macs:
                 return False
+
+    ap_prefix = f"ap_{config_entry.entry_id}_"
+    removed_meta = False
+    for domain, ident in device_entry.identifiers:
+        if domain == DOMAIN and ident.startswith(ap_prefix):
+            sid = ident[len(ap_prefix) :]
+            if runtime_data.coordinator.known_aps.pop(sid, None) is not None:
+                removed_meta = True
+            runtime_data.coordinator._checked_missing_aps.discard(sid)
+    if removed_meta:
+        runtime_data.coordinator.schedule_store_save()
 
     return True

@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterable
 from datetime import datetime, timezone
+import ipaddress
 import re
 from typing import Any
 
@@ -23,6 +25,7 @@ from ..ports.cluster_client import (
 _PROMPT_RE = re.compile(r"(?:^|[\r\n])[^\s#>][^\r\n#>]{0,63}(?:\([a-zA-Z0-9_-]+\))?\s*[#>]\s*$")
 _CONFIRM_YN_RE = re.compile(r"\(y/n\)\s*:?\s*$", re.IGNORECASE)
 _INVALID_CLI_ARG_RE = re.compile(r"[\r\n\"';|]")
+_VC_VIP_RETRY_POLLS = 20
 _CLI_ERROR_RE = re.compile(
     r"(?:invalid input|incomplete command|cannot|not allowed|read-only|error:|permission denied)",
     re.IGNORECASE,
@@ -110,8 +113,17 @@ async def _safe_close_ssh(conn: Any, process: Any) -> None:
             pass
 
 
+def _is_usable_ip(value: str) -> bool:
+    """Return True if value is a usable IPv4/IPv6 literal."""
+    try:
+        addr = ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return not (addr.is_unspecified or addr.is_loopback or addr.is_multicast or addr.is_link_local)
+
+
 class ArubaSshClient(BaseArubaClusterClient):
-    """Async SSH (`asyncssh`) wide-PTY client for Aruba Instant / AOS APs."""
+    """Async SSH (`asyncssh`) interactive PTY adapter for Aruba Instant & AOS APs."""
 
     def __init__(
         self,
@@ -128,13 +140,40 @@ class ArubaSshClient(BaseArubaClusterClient):
         self.port = port
         self.legacy_ssh = legacy_ssh
         self.timeout = timeout
+        self._active_host: str = self.host
         self._local_ap_ip: str | None = None
+        self._known_peer_ips: list[str] = [self.host] if _is_usable_ip(self.host) else []
+        self._unusable_vc_ips: set[str] = set()
+        self._vc_vip_failures: dict[str, int] = {}
+        self._vc_vip_cooldown: dict[str, int] = {}
         self._lock = asyncio.Lock()
 
-    async def _connect(self) -> Any:
-        """Open an `asyncssh` connection with bounded timeout, safe decoding, and legacy KEX fallback."""
+    @property
+    def active_host(self) -> str:
+        """Return currently targeted SSH host."""
+        return self._active_host
+
+    def set_known_peer_ips(self, peer_ips: Iterable[str]) -> None:
+        """Merge known cluster AP IPs for SSH peer failover."""
+        seen = set(self._known_peer_ips)
+        for raw_ip in peer_ips:
+            ip_str = str(raw_ip or "").strip()
+            if ip_str and _is_usable_ip(ip_str) and ip_str not in seen:
+                self._known_peer_ips.append(ip_str)
+                seen.add(ip_str)
+
+    def get_known_peer_ips(self) -> list[str]:
+        """Return known cluster AP IPs discovered so far."""
+        return list(self._known_peer_ips)
+
+    def get_vc_vip_failure_count(self, vc_ip: str) -> int:
+        """Return consecutive connection failure count for an advertised VC VIP."""
+        return self._vc_vip_failures.get(vc_ip.strip(), 0)
+
+    async def _connect_single(self, target_host: str) -> Any:
+        """Open an `asyncssh` connection to a single target with legacy KEX fallback."""
         kwargs: dict[str, Any] = {
-            "host": self.host,
+            "host": target_host,
             "port": self.port,
             "username": self.username,
             "password": self.password,
@@ -159,8 +198,8 @@ class ArubaSshClient(BaseArubaClusterClient):
             return await _dial(kwargs)
         except asyncssh.PermissionDenied as exc:
             raise ArubaAuthError(
-                f"SSH authentication failed for {self.host}: {exc}",
-                host=self.host,
+                f"SSH authentication failed for {target_host}: {exc}",
+                host=target_host,
             ) from exc
         except asyncssh.KeyExchangeFailed as exc:
             if not self.legacy_ssh:
@@ -171,23 +210,60 @@ class ArubaSshClient(BaseArubaClusterClient):
                     return await _dial(retry_kwargs)
                 except asyncssh.PermissionDenied as auth_exc:
                     raise ArubaAuthError(
-                        f"SSH authentication failed for {self.host}: {auth_exc}",
-                        host=self.host,
+                        f"SSH authentication failed for {target_host}: {auth_exc}",
+                        host=target_host,
                     ) from auth_exc
                 except (asyncssh.Error, OSError, asyncio.TimeoutError) as retry_exc:
                     raise ArubaConnectionError(
-                        f"SSH legacy KEX connection failed for {self.host}: {retry_exc}",
-                        host=self.host,
+                        f"SSH legacy KEX connection failed for {target_host}: {retry_exc}",
+                        host=target_host,
                     ) from retry_exc
             raise ArubaConnectionError(
-                f"SSH key exchange failed for {self.host}: {exc}",
-                host=self.host,
+                f"SSH key exchange failed for {target_host}: {exc}",
+                host=target_host,
             ) from exc
         except (asyncssh.Error, OSError, asyncio.TimeoutError, UnicodeDecodeError) as exc:
             raise ArubaConnectionError(
-                f"SSH connection error to {self.host}:{self.port}: {exc}",
-                host=self.host,
+                f"SSH connection error to {target_host}:{self.port}: {exc}",
+                host=target_host,
             ) from exc
+
+    async def _connect(self) -> Any:
+        """Connect to active host or fail over through known cluster peer IPs."""
+        primary_candidates: list[str] = []
+        deferred_candidates: list[str] = []
+        seen: set[str] = set()
+        for raw in (self._active_host, self.host, *self._known_peer_ips):
+            clean = (raw or "").strip()
+            if not clean or clean in seen:
+                continue
+            seen.add(clean)
+            if clean in self._unusable_vc_ips and clean != self._active_host:
+                deferred_candidates.append(clean)
+            else:
+                primary_candidates.append(clean)
+        candidates = [*primary_candidates, *deferred_candidates]
+
+        last_exc: ArubaConnectionError | None = None
+        for target in candidates:
+            try:
+                conn = await self._connect_single(target)
+                self._active_host = target
+                self._unusable_vc_ips.discard(target)
+                self._vc_vip_failures.pop(target, None)
+                self._vc_vip_cooldown.pop(target, None)
+                return conn
+            except ArubaAuthError:
+                raise
+            except ArubaConnectionError as exc:
+                if _is_usable_ip(target):
+                    self._unusable_vc_ips.add(target)
+                    self._vc_vip_failures[target] = self._vc_vip_failures.get(target, 0) + 1
+                    self._vc_vip_cooldown[target] = _VC_VIP_RETRY_POLLS
+                last_exc = exc
+
+        assert last_exc is not None
+        raise last_exc
 
     async def _run_pty_commands(self, commands: list[str]) -> dict[str, str]:
         """Open wide interactive PTY, disable paging, and run a command sequence."""
@@ -231,6 +307,52 @@ class ArubaSshClient(BaseArubaClusterClient):
             )
             if snapshot.summary.ip_address and snapshot.summary.ip_address not in ("-", "--"):
                 self._local_ap_ip = snapshot.summary.ip_address
+            discovered_ips: list[str] = [
+                ap.ip_address for ap in snapshot.access_points if ap.ip_address
+            ]
+            if snapshot.summary.conductor_ip:
+                discovered_ips.append(snapshot.summary.conductor_ip)
+            if snapshot.summary.vc_ip:
+                discovered_ips.append(snapshot.summary.vc_ip)
+            self.set_known_peer_ips(discovered_ips)
+            dns_to_vc_vip = not _is_usable_ip(self._active_host) and self._local_ap_ip == snapshot.summary.vc_ip
+            vc_ip = snapshot.summary.vc_ip
+            conductor_ip = snapshot.summary.conductor_ip
+            if vc_ip and vc_ip in self._unusable_vc_ips:
+                remaining = self._vc_vip_cooldown.get(vc_ip, _VC_VIP_RETRY_POLLS) - 1
+                if remaining <= 0:
+                    self._unusable_vc_ips.discard(vc_ip)
+                    self._vc_vip_cooldown.pop(vc_ip, None)
+                else:
+                    self._vc_vip_cooldown[vc_ip] = remaining
+            if vc_ip and self._active_host == vc_ip:
+                self._vc_vip_failures.pop(vc_ip, None)
+                self._vc_vip_cooldown.pop(vc_ip, None)
+            if not dns_to_vc_vip:
+                if vc_ip and _is_usable_ip(vc_ip) and vc_ip not in self._unusable_vc_ips:
+                    self._active_host = vc_ip
+                elif (
+                    conductor_ip
+                    and _is_usable_ip(conductor_ip)
+                    and self._active_host != conductor_ip
+                ):
+                    self._active_host = conductor_ip
+                    if len(snapshot.access_points) <= 1:
+                        outputs = await self._run_pty_commands(
+                            ["show summary", "show network", "show aps", "show clients"]
+                        )
+                        snapshot = build_snapshot(
+                            summary_raw=outputs["show summary"],
+                            networks_raw=outputs["show network"],
+                            aps_raw=outputs["show aps"],
+                            clients_raw=outputs["show clients"],
+                            fetched_at=datetime.now(timezone.utc),
+                        )
+                        if snapshot.summary.ip_address and snapshot.summary.ip_address not in ("-", "--"):
+                            self._local_ap_ip = snapshot.summary.ip_address
+                        self.set_known_peer_ips(
+                            ap.ip_address for ap in snapshot.access_points if ap.ip_address
+                        )
             return snapshot
 
     async def async_enable_rest_api(self) -> None:
@@ -312,16 +434,17 @@ class ArubaSshClient(BaseArubaClusterClient):
     async def async_fetch_firmware_details(
         self,
     ) -> tuple[FirmwareImageInfo | None, FirmwareCheckResult | None]:
-        """Fetch firmware partition, reboot cause, and upgrade status over SSH."""
+        """Fetch firmware partition, reboot cause, upgrade status, and allowlist over SSH."""
         async with self._lock:
             outputs = await self._run_pty_commands(
-                ["show image version", "show version", "show upgrade info"]
+                ["show image version", "show version", "show upgrade info", "show allowed-aps"]
             )
             return (
                 build_firmware_info(
                     outputs.get("show image version", ""),
                     outputs.get("show version", ""),
                     outputs.get("show upgrade info", ""),
+                    outputs.get("show allowed-aps", ""),
                 ),
                 None,
             )
@@ -345,9 +468,11 @@ class ArubaSshClient(BaseArubaClusterClient):
             )
 
     async def async_reboot_ap(self, ap_ip: str) -> None:
-        """Reboot the directly connected SSH AP after confirming the `(y/n)` prompt."""
+        """Reboot the target SSH AP directly without cluster failover."""
         target = ap_ip.strip()
-        allowed_targets = {self.host}
+        if target and _INVALID_CLI_ARG_RE.search(target):
+            raise ArubaConnectionError(f"Invalid AP IP address: {ap_ip!r}", host=self.host)
+        allowed_targets = {self.host, *self._known_peer_ips}
         if self._local_ap_ip:
             allowed_targets.add(self._local_ap_ip)
         if target and target not in allowed_targets:
@@ -355,8 +480,12 @@ class ArubaSshClient(BaseArubaClusterClient):
                 f"SSH reload on {self.host} cannot target cluster member {target}; enable HTTPS REST (:4343)",
                 host=self.host,
             )
+        if target and self._local_ap_ip and target == self._local_ap_ip and not _is_usable_ip(self.host):
+            dial_host = self.host
+        else:
+            dial_host = target or self.host
         async with self._lock:
-            conn = await self._connect()
+            conn = await self._connect_single(dial_host)
             process: Any = None
             try:
                 process = await asyncio.wait_for(

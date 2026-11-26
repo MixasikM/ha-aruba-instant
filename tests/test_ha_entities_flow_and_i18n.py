@@ -14,6 +14,7 @@ import pytest
 
 from custom_components.aruba_instant import (
     async_remove_config_entry_device,
+    async_remove_entry,
     async_setup,
     async_setup_entry,
     async_unload_entry,
@@ -159,7 +160,7 @@ def test_manifest_hacs_brand_and_i18n_parity() -> None:
     assert keys[1] == "name"
     assert keys[2:] == sorted(keys[2:]), "manifest.json keys after name must be alphabetical"
     assert manifest["integration_type"] == "hub"
-    assert manifest["version"] == "0.2.0"
+    assert manifest["version"] == "0.3.0"
     assert manifest["categories"] == [
         "computers_network.routers_network",
         "presence_location.network_presence",
@@ -1060,6 +1061,7 @@ async def test_v020_firmware_channels_write_controls_and_purge_service() -> None
     assert s_by_eid["sensor.aruba_ap_lobby_5ghz_channel"].native_value == "36E"
     assert s_by_eid["sensor.aruba_ap_lobby_2_4ghz_channel"].native_value == "1"
     assert s_by_eid["sensor.aruba_ap_lobby_6ghz_channel"].native_value == "37w"
+    assert s_by_eid["sensor.aruba_ap_lobby_ip_address"].native_value == "192.0.2.11"
     ap_fw = s_by_eid["sensor.aruba_ap_lobby_firmware"]
     assert isinstance(ap_fw, ArubaApFirmwareSensor)
     assert "8.10.0.24_97188" in str(ap_fw.native_value)
@@ -1206,3 +1208,96 @@ async def test_v020_firmware_channels_write_controls_and_purge_service() -> None
     )
     assert "device_tracker.aruba_shared_phone" in shared_res["purged_entities"]
     assert shared_dev.id in dev_reg.devices
+
+    # Offline AP lifecycle: keep offline AP with IP when still in allowlist, remove device when dropped
+    from dataclasses import replace
+
+    ap_lab_dev = dev_reg.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, f"ap_{entry.entry_id}_SN00000002")},
+        name="Aruba AP-Lab Desk",
+    )
+    ap_branch_dev = dev_reg.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={(DOMAIN, f"ap_{entry.entry_id}_SN00000003")},
+        name="Aruba AP-Branch",
+    )
+    assert "SN00000002" in coord.known_aps
+    two_ap_snap = replace(snap, access_points=[ap for ap in snap.access_points if ap.stable_id == "SN00000001"])
+    fw_allow_lab = replace(fw_info, allowed_ap_macs=("02:00:00:10:00:01", "02:00:00:10:00:02"))
+    async def _next_snap() -> Any:
+        return two_ap_snap
+
+    async def _next_fw() -> tuple[Any, Any]:
+        return (fw_allow_lab, client.fw_check)
+
+    client.async_fetch_snapshot = _next_snap  # type: ignore[method-assign]
+    client.async_fetch_firmware_details = _next_fw  # type: ignore[method-assign]
+    await coord.async_refresh()
+    aps_after = {ap.stable_id: ap for ap in coord.data.access_points}
+    assert aps_after["SN00000002"].online is False
+    assert aps_after["SN00000002"].ip_address == "192.0.2.12"
+    assert s_by_eid["sensor.aruba_ap_lab_desk_ip_address"].available is True
+    assert s_by_eid["sensor.aruba_ap_lab_desk_ip_address"].native_value == "192.0.2.12"
+    assert s_by_eid["sensor.aruba_ap_lab_desk_clients"].available is False
+    assert "SN00000003" not in aps_after
+    assert ap_lab_dev.id in dev_reg.devices
+    assert ap_branch_dev.id not in dev_reg.devices
+
+    # User-triggered deletion of offline AP device immediately prunes known_aps
+    assert await async_remove_config_entry_device(hass, entry, ap_lab_dev) is True
+    assert "SN00000002" not in coord.known_aps
+
+    # Entry removal cleans up .storage client & peer store
+    store_key = f"{DOMAIN}.{entry.entry_id}.clients"
+    assert store_key in hass.data.get("_stores", {})
+    await async_remove_entry(hass, entry)
+    assert store_key not in hass.data.get("_stores", {})
+
+    # VC VIP unreachable Repairs issue lifecycle: create at >= 2 failures, clear when recovered
+    class _VipWarningClient:
+        active_host = "192.0.2.11"
+
+        def __init__(self) -> None:
+            self.vip_failures = 0
+
+        def get_vc_vip_failure_count(self, vc_ip: str) -> int:
+            return self.vip_failures if vc_ip == "192.0.2.10" else 0
+
+        async def async_fetch_snapshot(self) -> Any:
+            return snap
+
+        async def async_close(self) -> None:
+            return None
+
+    vip_client = _VipWarningClient()
+    vip_entry = ConfigEntry(
+        entry_id="cluster_vip_warn",
+        unique_id="cluster_192.0.2.12",
+        title="Aruba MainCluster",
+        data={CONF_TOPOLOGY_MODE: TOPOLOGY_CLUSTER, CONF_SITE_NAME: "MainCluster", CONF_NODES: []},
+        options={CONF_TRACKED_SSIDS: ["CorpWiFi"]},
+    )
+    vip_coord = ArubaDataUpdateCoordinator(
+        hass=hass,
+        config_entry=vip_entry,
+        client=vip_client,  # type: ignore[arg-type]
+        site_name="MainCluster",
+        topology_mode=TOPOLOGY_CLUSTER,
+    )
+    issue_key = (DOMAIN, f"vc_vip_unreachable_{vip_entry.entry_id}")
+    vip_client.vip_failures = 1
+    await vip_coord.async_refresh()
+    assert issue_key not in hass.data.get("_issues", {})
+
+    vip_client.vip_failures = 2
+    await vip_coord.async_refresh()
+    issue = hass.data.get("_issues", {}).get(issue_key)
+    assert issue is not None
+    assert issue["translation_key"] == "vc_vip_unreachable"
+    assert issue["translation_placeholders"]["vc_ip"] == "192.0.2.10"
+    assert issue["translation_placeholders"]["conductor_ip"] == "192.0.2.11"
+
+    vip_client.vip_failures = 0
+    await vip_coord.async_refresh()
+    assert issue_key not in hass.data.get("_issues", {})

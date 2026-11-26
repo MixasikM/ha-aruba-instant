@@ -131,6 +131,7 @@ async def async_setup_entry(
                 ("24ghz_util", ArubaAp24GhzUtilSensor),
                 ("5ghz_channel", ArubaAp5GhzChannelSensor),
                 ("24ghz_channel", ArubaAp24GhzChannelSensor),
+                ("ip_address", ArubaApIpAddressSensor),
                 ("firmware", ArubaApFirmwareSensor),
                 ("uptime", ArubaApUptimeSensor),
             ]
@@ -505,6 +506,33 @@ class ArubaAp6GhzChannelSensor(_BaseArubaApSensor):
         if ap is None or not ap.radio_6ghz_channel or ap.radio_6ghz_channel == "--":
             return None
         return ap.radio_6ghz_channel
+
+
+class ArubaApIpAddressSensor(_BaseArubaApSensor):
+    """Management IPv4/IPv6 address sensor on a physical Access Point."""
+
+    _attr_translation_key = "ap_ip_address"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: ArubaDataUpdateCoordinator,
+        ap: AccessPoint,
+        ap_info: dr.DeviceInfo,
+    ) -> None:
+        super().__init__(coordinator, ap, ap_info, "ip_address", "ip_address")
+
+    @property
+    def available(self) -> bool:
+        """Retain the last known AP IP address even while the AP itself is offline."""
+        return super(_BaseArubaApSensor, self).available and self.native_value is not None
+
+    @property
+    def native_value(self) -> str | None:
+        ap = self._current_ap()
+        if ap is None or not ap.ip_address or ap.ip_address in ("-", "--"):
+            return None
+        return ap.ip_address
 
 
 class ArubaApFirmwareSensor(_BaseArubaApSensor):
